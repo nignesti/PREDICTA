@@ -104,7 +104,8 @@ serie-a-dashboard/
 │   ├── 1994.txt
 │   └── ...
 ├── venv/                   # Ambiente virtuale Python
-└── readme.md               # Questo file
+├── readme.md               # Questo file
+└── ROADMAP.md              # Piano dettagliato Fase 2/3: fonti dati, letteratura, tecniche
 ```
 
 ---
@@ -171,13 +172,13 @@ streamlit run app.py
 
 Con i pesi validati (forma leggera + quote) il modello batte le sole quote di ~1 punto percentuale medio, in modo stabile su tre stagioni indipendenti. È un margine reale ma piccolo: prima di investire in feature più complesse ha senso capire perché storico e scontri diretti, anche dopo averli sistemati (decadimento temporale, forza relativa alla media di lega), non aggiungono valore — probabile indizio che il mercato incorpora già quell'informazione meglio di come possiamo farlo con le sole medie sui gol.
 
-- [ ] **Sistema Elo o pi-ratings dinamico**: un rating che si aggiorna partita per partita potrebbe catturare la "forza vera" di una squadra meglio delle medie storiche/forma attuali, che nonostante il decadimento temporale non hanno ancora battuto il mercato da sole
-- [ ] **Expected Goals (xG) reali** al posto dei gol effettivi come base per storico/forma: i gol sono rumorosi, l'xG lo è meno (fonti: Understat, FBref)
-- [ ] **Value betting**: dato che il modello batte il mercato di un margine misurabile, ha senso iniziare a valutare quote realmente vantaggiose — ma il margine è piccolo, quindi da trattare con cautela
-- [ ] **Modello XGBoost** con più feature (Elo, xG, riposo tra partite), una volta consolidato un vantaggio sopra le quote più ampio dell'attuale ~1%
-- [ ] **Calendario prossima giornata** con pronostici automatici
-- [ ] **NLP News** per integrare infortuni e calciomercato
-- [ ] **Multi-campionato** (Premier League, Liga, Bundesliga)
+Il piano dettagliato (fonti dati specifiche, letteratura accademica, tecniche di modellazione, errori comuni da evitare) è in **[ROADMAP.md](ROADMAP.md)**. In sintesi, i prossimi passi:
+
+- [ ] **Sistema Elo o pi-ratings dinamico** al posto delle medie storiche/forma attuali
+- [ ] **Expected Goals (xG) reali** al posto dei gol effettivi (fonti: Understat, FBref)
+- [ ] **Modello XGBoost** con più feature (Elo, xG, riposo tra partite)
+- [ ] **Value betting**, con cautela: il margine sopra il mercato è reale ma piccolo (~1%)
+- [ ] **Multi-campionato**, **calendario automatico**, **NLP infortuni/calciomercato**
 
 ---
 
