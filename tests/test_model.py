@@ -4,6 +4,7 @@ import pytest
 
 import app
 import backtesting as bt
+import modello
 
 
 def _partite_squadra(df, squadra):
@@ -94,11 +95,30 @@ def test_stima_probabilita_squadra_sconosciuta_restituisce_none():
     assert app.stima_probabilita(app.df, app.stats, "Squadra Non Esistente", "Inter") is None
 
 
+def test_stima_probabilita_peso_quote_alto_non_schiaccia_xg():
+    # Regressione: quando peso_quote e' alto (es. 0.85), storico+forma+scontri
+    # restavano pesati per la loro quota originale (es. 0.15) invece di essere
+    # rinormalizzati a sommare 1 tra loro, producendo xG assurdamente bassi
+    # (es. 0.24 invece di ~1.6) perche' "quote" non entra nel calcolo dell'xG.
+    squadre = app.stats["Squadra"].unique()
+    squadra_casa, squadra_trasferta = squadre[0], squadre[1]
+
+    risultato = app.stima_probabilita(
+        app.df, app.stats, squadra_casa, squadra_trasferta,
+        peso_forma=0.0, peso_scontri=0.15, peso_quote=0.85,
+    )
+
+    assert risultato is not None
+    # Un xG sotto 0.5 per una squadra di Serie A e' irrealistico: e' la firma del bug.
+    assert risultato["xG_casa"] > 0.5
+    assert risultato["xG_trasferta"] > 0.5
+
+
 def test_backtesting_pesi_oltre_1_non_usa_i_valori_hardcoded():
     # Prima del fix, una somma pesi > 1 faceva scattare un fallback con valori
     # hardcoded (0.2/0.4/0.15/0.25) invece di normalizzare quelli scelti dall'utente.
-    pred_normale = bt.predici_partita_bt(bt.train_df, bt.test_df, 0, bt.stats, 0.5, 0.15, 0.15)
-    pred_pesi_alti = bt.predici_partita_bt(bt.train_df, bt.test_df, 0, bt.stats, 1.0, 0.5, 0.5)
+    pred_normale = bt.predici_partita_bt(bt.train_df, bt.test_df, 0, 0.5, 0.15, 0.15, 730, -0.10)
+    pred_pesi_alti = bt.predici_partita_bt(bt.train_df, bt.test_df, 0, 1.0, 0.5, 0.5, 730, -0.10)
 
     assert pred_normale is not None
     assert pred_pesi_alti is not None
@@ -107,13 +127,100 @@ def test_backtesting_pesi_oltre_1_non_usa_i_valori_hardcoded():
 
 
 def test_backtesting_usa_le_quote_reali_della_partita_di_test():
-    riga_con_quote = bt.test_df[bt.test_df["B365H"].notna()].iloc[0]
+    colonna_quota = "OddsAvgH" if "OddsAvgH" in bt.test_df.columns else "B365H"
+    riga_con_quote = bt.test_df[bt.test_df[colonna_quota].notna()].iloc[0]
     idx = bt.test_df.index.get_loc(riga_con_quote.name)
 
-    pred_senza_quote = bt.predici_partita_bt(bt.train_df, bt.test_df, idx, bt.stats, 0.5, 0.15, 0.0)
-    pred_con_quote = bt.predici_partita_bt(bt.train_df, bt.test_df, idx, bt.stats, 0.5, 0.15, 1.0)
+    pred_senza_quote = bt.predici_partita_bt(bt.train_df, bt.test_df, idx, 0.5, 0.15, 0.0, 730, -0.10)
+    pred_con_quote = bt.predici_partita_bt(bt.train_df, bt.test_df, idx, 0.5, 0.15, 1.0, 730, -0.10)
 
     assert pred_senza_quote is not None and pred_con_quote is not None
-    # Con peso_quote=1 la previsione deve avvicinarsi alle probabilità implicite delle quote reali
-    prob_1_quota_implicita = 1 / riga_con_quote["B365H"]
+    # Con peso_quote=1 la previsione deve spostarsi rispetto a quella senza quote
     assert pred_con_quote["1"] != pytest.approx(pred_senza_quote["1"], abs=1e-9)
+
+
+def test_backtesting_peso_quote_alto_non_schiaccia_xg():
+    # Stessa regressione di test_stima_probabilita_peso_quote_alto_non_schiaccia_xg
+    # ma nel motore di backtesting: le due implementazioni erano gia' divergenti in
+    # passato (bug sugli scontri diretti), quindi si testano entrambe separatamente.
+    pred = bt.predici_partita_bt(bt.train_df, bt.test_df, 0, 0.0, 0.15, 0.85, 730, -0.10)
+    assert pred is not None
+    # Se il bug fosse presente, p_X (pareggio) sarebbe innaturalmente alto perche'
+    # l'xG di base collasserebbe verso 0 nella componente "senza quote".
+    assert pred["X"] < 0.45
+
+
+# ------------------------------------------------------------
+# modello.py: Dixon-Coles, decadimento temporale, RPS
+# ------------------------------------------------------------
+
+def test_tau_dixon_coles_valori_neutri_fuori_dai_bassi_punteggi():
+    assert modello.tau_dixon_coles(2, 2, 1.5, 1.2, -0.1) == 1.0
+    assert modello.tau_dixon_coles(3, 0, 1.5, 1.2, -0.1) == 1.0
+
+
+def test_tau_dixon_coles_rho_negativo_aumenta_probabilita_pareggio():
+    matrice_neutra = modello.distribuzione_punteggi(1.5, 1.1, rho=0.0)
+    matrice_corretta = modello.distribuzione_punteggi(1.5, 1.1, rho=-0.1)
+
+    esiti_neutri = modello.esiti_da_matrice(matrice_neutra)
+    esiti_corretti = modello.esiti_da_matrice(matrice_corretta)
+
+    # Un rho negativo tipico di Dixon-Coles alza la probabilita' di pareggio
+    # (corregge la sottostima dei pareggi di un Poisson indipendente puro).
+    assert esiti_corretti["p_X"] > esiti_neutri["p_X"]
+
+
+def test_distribuzione_punteggi_somma_a_uno():
+    for xg_casa, xg_trasf, rho in [(0.8, 0.8, -0.1), (2.5, 0.3, -0.2), (1.2, 1.2, 0.0)]:
+        matrice = modello.distribuzione_punteggi(xg_casa, xg_trasf, rho=rho)
+        assert matrice.sum() == pytest.approx(1.0, abs=1e-9)
+        assert (matrice >= 0).all()
+
+
+def test_rps_previsione_perfetta_e_peggiore():
+    assert modello.rps({"1": 1.0, "X": 0.0, "2": 0.0}, "1") == pytest.approx(0.0)
+    assert modello.rps({"1": 1.0, "X": 0.0, "2": 0.0}, "2") == pytest.approx(1.0)
+
+
+def test_peso_esponenziale_dimezza_dopo_emivita():
+    pesi = modello.peso_esponenziale(np.array([0, 365, 730]), half_life_giorni=365)
+    assert pesi[0] == pytest.approx(1.0)
+    assert pesi[1] == pytest.approx(0.5)
+    assert pesi[2] == pytest.approx(0.25)
+
+
+def test_peso_esponenziale_nessun_decadimento_se_half_life_none():
+    pesi = modello.peso_esponenziale(np.array([0, 10000]), half_life_giorni=None)
+    assert (pesi == 1.0).all()
+
+
+def test_stats_pesate_squadre_emivita_corta_ignora_partite_vecchie():
+    df = pd.DataFrame([
+        {"HomeTeam": "A", "AwayTeam": "B", "FTHG": 0, "FTAG": 0, "Date": pd.Timestamp("2000-01-01")},
+        {"HomeTeam": "A", "AwayTeam": "B", "FTHG": 5, "FTAG": 0, "Date": pd.Timestamp("2024-01-01")},
+    ])
+    stats = modello.stats_pesate_squadre(df, data_riferimento=pd.Timestamp("2024-01-01"), half_life_giorni=1)
+    riga_a = stats[stats["Squadra"] == "A"].iloc[0]
+    # Con un'emivita di 1 giorno, la partita del 2000 pesa ~0: la media deve
+    # essere quella della partita recente (5 gol), non una via di mezzo.
+    assert riga_a["gol_fatti_casa_storico"] == pytest.approx(5.0, abs=0.01)
+
+
+# ------------------------------------------------------------
+# Integrita' del dataset (regressione: stagione 2009/10 duplicata, 2010/11 mancante)
+# ------------------------------------------------------------
+
+def test_dataset_nessuna_partita_duplicata():
+    duplicati = app.df.duplicated(subset=["Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG"]).sum()
+    assert duplicati == 0
+
+
+def test_dataset_ordinato_cronologicamente():
+    assert app.df["Date"].is_monotonic_increasing
+
+
+def test_dataset_nessuna_stagione_mancante_tra_min_e_max():
+    stagioni = sorted(int(s) for s in app.df["Stagione"].unique())
+    attese = list(range(stagioni[0], stagioni[-1] + 1))
+    assert stagioni == attese

@@ -3,6 +3,16 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
+from modello import stats_pesate_squadre, distribuzione_punteggi, esiti_da_matrice
+
+# Iperparametri Dixon-Coles validati via backtest (vedi pages/backtesting.py):
+# EMIVITA_GIORNI: dopo quanti giorni una partita storica pesa la metà nelle medie
+#   squadra (decadimento esponenziale, invece di media semplice su 33 stagioni).
+# RHO_DIXON_COLES: correzione per i punteggi bassi (0-0, 1-0, 0-1, 1-1), dove un
+#   Poisson indipendente sottostima sistematicamente i pareggi.
+EMIVITA_GIORNI = 730
+RHO_DIXON_COLES = -0.10
+
 # ------------------------------------------------------------
 # CONFIGURAZIONE PAGINA
 # ------------------------------------------------------------
@@ -35,6 +45,7 @@ def load_data(path):
     df = pd.read_csv(path)
     df["FTHG"] = pd.to_numeric(df["FTHG"], errors="coerce")
     df["FTAG"] = pd.to_numeric(df["FTAG"], errors="coerce")
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
     df = df.dropna(subset=["FTHG", "FTAG"])
     return df
 
@@ -132,12 +143,9 @@ def scontri_diretti(df, squadra1, squadra2, ultimi_n=10):
             else: vittorie_s2 += 1
     return np.mean(gol_fatti_s1), np.mean(gol_subiti_s1), vittorie_s1, pareggi, vittorie_s2, scontri
 
-home_stats = df.groupby("HomeTeam").agg(
-    gol_fatti_casa_storico=("FTHG", "mean"), gol_subiti_casa_storico=("FTAG", "mean")).reset_index()
-away_stats = df.groupby("AwayTeam").agg(
-    gol_fatti_trasferta_storico=("FTAG", "mean"), gol_subiti_trasferta_storico=("FTHG", "mean")).reset_index()
-stats = pd.merge(home_stats, away_stats, left_on="HomeTeam", right_on="AwayTeam", how="outer")
-stats = stats.rename(columns={"HomeTeam": "Squadra"}).fillna(0)
+# Statistiche storiche pesate nel tempo (le partite recenti contano di più di
+# quelle di 30 anni fa) invece di una media semplice su tutta la storia.
+stats = stats_pesate_squadre(df, data_riferimento=df["Date"].max(), half_life_giorni=EMIVITA_GIORNI)
 
 def stima_probabilita(df, stats, squadra_casa, squadra_trasferta,
                       peso_forma=0.0, peso_scontri=0.15, peso_quote=0.85):
@@ -191,19 +199,22 @@ def stima_probabilita(df, stats, squadra_casa, squadra_trasferta,
         peso_scontri = 0
 
     # --- QUOTE BOOKMAKER (NOVITÀ) ---
-    # Prendiamo le quote medie degli ultimi scontri diretti (se disponibili)
+    # Prendiamo le quote medie degli ultimi scontri diretti (se disponibili).
+    # Preferiamo la quota di consenso multi-bookmaker (OddsAvg*) a Bet365 da solo:
+    # meno rumore da un singolo book, copertura pressoché totale dal 2011 in poi.
     quote_presenti = False
     prob_1_quote, prob_X_quote, prob_2_quote = 0, 0, 0
+    colonne_quota = ("OddsAvgH", "OddsAvgD", "OddsAvgA") if "OddsAvgH" in df.columns else ("B365H", "B365D", "B365A")
 
-    if "B365H" in df.columns and scontri[0] is not None:
+    if colonne_quota[0] in df.columns and scontri[0] is not None:
         _, _, _, _, _, tabella_scontri = scontri
-        if "B365H" in tabella_scontri.columns:
-            quote_valide = tabella_scontri.dropna(subset=["B365H", "B365D", "B365A"])
+        if colonne_quota[0] in tabella_scontri.columns:
+            quote_valide = tabella_scontri.dropna(subset=list(colonne_quota))
             if len(quote_valide) > 0:
                 # Converti quote in probabilità implicite e fai la media
-                prob_1_quote = (1 / quote_valide["B365H"]).mean()
-                prob_X_quote = (1 / quote_valide["B365D"]).mean()
-                prob_2_quote = (1 / quote_valide["B365A"]).mean()
+                prob_1_quote = (1 / quote_valide[colonne_quota[0]]).mean()
+                prob_X_quote = (1 / quote_valide[colonne_quota[1]]).mean()
+                prob_2_quote = (1 / quote_valide[colonne_quota[2]]).mean()
                 # Normalizza (rimuovi il margine del bookmaker)
                 somma = prob_1_quote + prob_X_quote + prob_2_quote
                 prob_1_quote /= somma
@@ -228,26 +239,32 @@ def stima_probabilita(df, stats, squadra_casa, squadra_trasferta,
         peso_storico_final += peso_quote
         peso_quote = 0
 
-    # Combinazione pesata per i gol attesi
-    xG_casa = (peso_storico_final * xG_casa_storico +
-               peso_forma * xG_casa_forma +
-               peso_scontri * xG_casa_scontri)
-    xG_trasferta = (peso_storico_final * xG_trasf_storico +
-                    peso_forma * xG_trasf_forma +
-                    peso_scontri * xG_trasf_scontri)
+    # Combinazione pesata per i gol attesi: storico+forma+scontri vanno rinormalizzati
+    # a sommare 1 tra loro, perché "quote" non entra qui (entra dopo, sulle probabilità
+    # finali) — altrimenti con peso_quote alto (es. 0.85) i pesi restanti (es. 0.15 di
+    # scontri) scalano l'xG verso il basso invece di usarlo per intero.
+    peso_xg_totale = peso_storico_final + peso_forma + peso_scontri
+    if peso_xg_totale > 0:
+        xG_casa = (peso_storico_final * xG_casa_storico +
+                   peso_forma * xG_casa_forma +
+                   peso_scontri * xG_casa_scontri) / peso_xg_totale
+        xG_trasferta = (peso_storico_final * xG_trasf_storico +
+                        peso_forma * xG_trasf_forma +
+                        peso_scontri * xG_trasf_scontri) / peso_xg_totale
+    else:
+        xG_casa, xG_trasferta = xG_casa_storico, xG_trasf_storico
 
     # Il vantaggio campo è già incorporato sopra (ogni componente è scalata su
     # media_gol_casa o media_gol_trasferta), quindi qui non va riapplicato: raddoppiarlo
     # schiacciava il modello su "vince sempre la casa" a prescindere dalle squadre.
 
-    # --- SIMULAZIONE MONTECARLO ---
-    n_sim = 10000
-    gol_casa_sim = np.random.poisson(max(0.1, xG_casa), n_sim)
-    gol_trasferta_sim = np.random.poisson(max(0.1, xG_trasferta), n_sim)
-
-    p_1_base = np.sum(gol_casa_sim > gol_trasferta_sim) / n_sim
-    p_X_base = np.sum(gol_casa_sim == gol_trasferta_sim) / n_sim
-    p_2_base = np.sum(gol_casa_sim < gol_trasferta_sim) / n_sim
+    # --- DISTRIBUZIONE ESATTA DEI PUNTEGGI (Dixon-Coles) ---
+    # Poisson indipendenti + correzione tau per i punteggi bassi, al posto della
+    # simulazione Monte Carlo: stesso modello concettuale ma deterministico (niente
+    # rumore campionario) e senza sottostimare sistematicamente i pareggi.
+    matrice_punteggi = distribuzione_punteggi(xG_casa, xG_trasferta, rho=RHO_DIXON_COLES)
+    esiti = esiti_da_matrice(matrice_punteggi)
+    p_1_base, p_X_base, p_2_base = esiti["p_1"], esiti["p_X"], esiti["p_2"]
 
     # Se abbiamo le quote, facciamo un blend finale
     if quote_presenti:
@@ -257,16 +274,8 @@ def stima_probabilita(df, stats, squadra_casa, squadra_trasferta,
     else:
         p_1, p_X, p_2 = p_1_base, p_X_base, p_2_base
 
-    # Risultati esatti
-    risultati_esatti = {}
-    for gc, gt in zip(gol_casa_sim, gol_trasferta_sim):
-        chiave = f"{gc}-{gt}"
-        risultati_esatti[chiave] = risultati_esatti.get(chiave, 0) + 1
-    top_risultati = sorted(risultati_esatti.items(), key=lambda x: x[1], reverse=True)[:5]
-    top_risultati = [(r, c / n_sim) for r, c in top_risultati]
-
-    over_25 = np.sum((gol_casa_sim + gol_trasferta_sim) > 2.5) / n_sim
-    over_15 = np.sum((gol_casa_sim + gol_trasferta_sim) > 1.5) / n_sim
+    top_risultati = esiti["top_risultati"]
+    over_25, over_15, under_25 = esiti["over_25"], esiti["over_15"], esiti["under_25"]
     gol_totali_attesi = xG_casa + xG_trasferta
 
     return {

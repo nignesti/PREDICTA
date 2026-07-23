@@ -3,7 +3,9 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
-from sklearn.metrics import accuracy_score, confusion_matrix, precision_recall_fscore_support
+from sklearn.metrics import accuracy_score, confusion_matrix, precision_recall_fscore_support, log_loss
+
+from modello import stats_pesate_squadre, distribuzione_punteggi, esiti_da_matrice, rps
 
 st.set_page_config(page_title="Backtesting", page_icon="📊", layout="wide")
 
@@ -64,6 +66,7 @@ def load_data():
     df = pd.read_csv("serie_a.csv")
     df["FTHG"] = pd.to_numeric(df["FTHG"], errors="coerce")
     df["FTAG"] = pd.to_numeric(df["FTAG"], errors="coerce")
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
     df = df.dropna(subset=["FTHG", "FTAG"])
     return df
 
@@ -88,6 +91,17 @@ n_partite_forma = st.sidebar.slider("Partite per forma", 3, 10, 5,
                     help="Ininfluente quando 'Peso forma' è 0.")
 peso_quote_bt = st.sidebar.slider("Peso quote", 0.0, 1.0, 0.85, 0.05)
 
+st.sidebar.markdown("---")
+st.sidebar.markdown("#### 🧮 Iperparametri Dixon-Coles")
+emivita_giorni_bt = st.sidebar.slider(
+    "Emivita statistiche storiche (giorni)", 90, 3650, 730, 90,
+    help="Dopo quanti giorni una partita pesa la metà nelle medie storiche. Sostituisce la media semplice su 33 stagioni."
+)
+rho_bt = st.sidebar.slider(
+    "Rho Dixon-Coles (correzione bassi punteggi)", -0.30, 0.10, -0.10, 0.02,
+    help="Corregge la sottostima dei pareggi tipica di un Poisson indipendente. Valori tipici in letteratura: -0.05/-0.20."
+)
+
 train_df = df[~df["Stagione"].astype(str).isin(stagioni_test)].copy()
 test_df = df[df["Stagione"].astype(str).isin(stagioni_test)].copy()
 
@@ -101,13 +115,6 @@ media_gol_casa = train_df["FTHG"].mean()
 media_gol_trasferta = train_df["FTAG"].mean()
 media_gol_generale = (media_gol_casa + media_gol_trasferta) / 2
 vantaggio_casa = media_gol_casa / media_gol_trasferta
-
-home_stats = train_df.groupby("HomeTeam").agg(
-    gol_fatti_casa=("FTHG", "mean"), gol_subiti_casa=("FTAG", "mean")).reset_index()
-away_stats = train_df.groupby("AwayTeam").agg(
-    gol_fatti_trasferta=("FTAG", "mean"), gol_subiti_trasferta=("FTHG", "mean")).reset_index()
-stats = pd.merge(home_stats, away_stats, left_on="HomeTeam", right_on="AwayTeam", how="outer")
-stats = stats.rename(columns={"HomeTeam": "Squadra"}).fillna(0)
 
 # ------------------------------------------------------------
 # FUNZIONI
@@ -142,130 +149,157 @@ def scontri_diretti_bt(df_prima, squadra1, squadra2, ultimi_n=10):
             gol_fatti_s1.append(row["FTAG"]); gol_subiti_s1.append(row["FTHG"])
     return np.mean(gol_fatti_s1), np.mean(gol_subiti_s1)
 
-def predici_partita_bt(train_df, test_df, idx_test, stats, peso_forma, peso_scontri, peso_quote=0.15):
+def precompute_componente(idx_test, half_life_giorni, n_partite_forma):
+    """Calcola le componenti costose (storico pesato nel tempo, forma, scontri
+    diretti, quote) per una partita di test. Dipendono solo da half_life_giorni e
+    n_partite_forma, MAI dai pesi forma/scontri/quote: si possono quindi calcolare
+    una volta sola e riusare per confrontare più configurazioni di pesi."""
     riga = test_df.iloc[idx_test]
     casa = riga["HomeTeam"]
     trasferta = riga["AwayTeam"]
 
+    idx_globale = len(train_df) + idx_test
+    df_fino_a_ora = pd.concat([train_df, test_df.iloc[:idx_test + 1]])
+    df_prima = df_fino_a_ora.iloc[:idx_globale]
+
+    stats = stats_pesate_squadre(df_prima, data_riferimento=riga["Date"], half_life_giorni=half_life_giorni)
     c = stats[stats["Squadra"] == casa]
     t = stats[stats["Squadra"] == trasferta]
     if c.empty or t.empty:
         return None
 
-    # --- STORICO (forza attacco/difesa relativa alla media di lega, come in app.py) ---
-    xG_casa_storico = (c["gol_fatti_casa"].values[0] / media_gol_casa) * (t["gol_subiti_trasferta"].values[0] / media_gol_trasferta) * media_gol_casa
-    xG_trasf_storico = (t["gol_fatti_trasferta"].values[0] / media_gol_trasferta) * (c["gol_subiti_casa"].values[0] / media_gol_casa) * media_gol_trasferta
+    xG_casa_storico = (c["gol_fatti_casa_storico"].values[0] / media_gol_casa) * (t["gol_subiti_trasferta_storico"].values[0] / media_gol_trasferta) * media_gol_casa
+    xG_trasf_storico = (t["gol_fatti_trasferta_storico"].values[0] / media_gol_trasferta) * (c["gol_subiti_casa_storico"].values[0] / media_gol_casa) * media_gol_trasferta
 
-    idx_globale = len(train_df) + idx_test
-    df_fino_a_ora = pd.concat([train_df, test_df.iloc[:idx_test+1]])
     fatti_c, subiti_c, fatti_c_home, _ = calcola_forma_bt(df_fino_a_ora, casa, idx_globale, n_partite_forma)
     fatti_t, subiti_t, _, fatti_t_away = calcola_forma_bt(df_fino_a_ora, trasferta, idx_globale, n_partite_forma)
+    xG_casa_forma = (fatti_c_home / media_gol_casa) * (max(subiti_t, 0.3) / media_gol_trasferta) * media_gol_casa if fatti_c_home > 0 else xG_casa_storico
+    xG_trasf_forma = (fatti_t_away / media_gol_trasferta) * (max(subiti_c, 0.3) / media_gol_casa) * media_gol_trasferta if fatti_t_away > 0 else xG_trasf_storico
 
-    if fatti_c_home > 0:
-        xG_casa_forma = (fatti_c_home / media_gol_casa) * (max(subiti_t, 0.3) / media_gol_trasferta) * media_gol_casa
-    else:
-        xG_casa_forma = xG_casa_storico
-    if fatti_t_away > 0:
-        xG_trasf_forma = (fatti_t_away / media_gol_trasferta) * (max(subiti_c, 0.3) / media_gol_casa) * media_gol_trasferta
-    else:
-        xG_trasf_forma = xG_trasf_storico
-
-    # --- SCONTRI DIRETTI (solo partite precedenti a quella corrente, niente lookahead) ---
-    df_prima = df_fino_a_ora.iloc[:idx_globale]
     gol_fatti_scontri, gol_subiti_scontri = scontri_diretti_bt(df_prima, casa, trasferta, ultimi_n=10)
     if gol_fatti_scontri is not None:
         xG_casa_scontri = (gol_fatti_scontri / media_gol_generale) * media_gol_casa
         xG_trasf_scontri = (gol_subiti_scontri / media_gol_generale) * media_gol_trasferta
+        scontri_validi = True
     else:
         xG_casa_scontri, xG_trasf_scontri = xG_casa_storico, xG_trasf_storico
-        peso_scontri = 0
+        scontri_validi = False
 
-    # --- QUOTE BOOKMAKER: usa le quote reali pre-partita di questo fixture, se presenti ---
     quote_presenti = False
     prob_1_quote, prob_X_quote, prob_2_quote = 0, 0, 0
-    if all(col in riga.index for col in ["B365H", "B365D", "B365A"]):
-        b365h, b365d, b365a = riga["B365H"], riga["B365D"], riga["B365A"]
-        if pd.notna(b365h) and pd.notna(b365d) and pd.notna(b365a):
-            prob_1_quote, prob_X_quote, prob_2_quote = 1 / b365h, 1 / b365d, 1 / b365a
+    colonne_quota = ("OddsAvgH", "OddsAvgD", "OddsAvgA") if "OddsAvgH" in riga.index else ("B365H", "B365D", "B365A")
+    if all(col in riga.index for col in colonne_quota):
+        qh, qd, qa = riga[colonne_quota[0]], riga[colonne_quota[1]], riga[colonne_quota[2]]
+        if pd.notna(qh) and pd.notna(qd) and pd.notna(qa):
+            prob_1_quote, prob_X_quote, prob_2_quote = 1 / qh, 1 / qd, 1 / qa
             somma = prob_1_quote + prob_X_quote + prob_2_quote
             prob_1_quote /= somma; prob_X_quote /= somma; prob_2_quote /= somma
             quote_presenti = True
 
-    # --- COMBINAZIONE PESI (storico + forma + scontri per gli xG, quote in blend finale, come in app.py) ---
-    peso_totale = peso_forma + peso_scontri + peso_quote
+    esito = "1" if riga["FTHG"] > riga["FTAG"] else ("X" if riga["FTHG"] == riga["FTAG"] else "2")
+
+    return dict(xG_casa_storico=xG_casa_storico, xG_trasf_storico=xG_trasf_storico,
+                xG_casa_forma=xG_casa_forma, xG_trasf_forma=xG_trasf_forma,
+                xG_casa_scontri=xG_casa_scontri, xG_trasf_scontri=xG_trasf_scontri,
+                scontri_validi=scontri_validi, quote_presenti=quote_presenti,
+                prob_1_quote=prob_1_quote, prob_X_quote=prob_X_quote, prob_2_quote=prob_2_quote,
+                esito=esito, stagione=str(riga["Stagione"]))
+
+def valuta_componente(comp, peso_forma, peso_scontri, peso_quote, rho):
+    """Combina le componenti precalcolate con i pesi scelti: veloce (nessun accesso
+    al DataFrame), si può richiamare molte volte sulle stesse componenti."""
+    peso_scontri_eff = peso_scontri if comp["scontri_validi"] else 0
+    peso_totale = peso_forma + peso_scontri_eff + peso_quote
     if peso_totale > 1:
-        peso_forma /= peso_totale
-        peso_scontri /= peso_totale
-        peso_quote /= peso_totale
+        pf, ps, pq = peso_forma / peso_totale, peso_scontri_eff / peso_totale, peso_quote / peso_totale
         peso_storico = 0
     else:
-        peso_storico = 1 - peso_forma - peso_scontri - peso_quote
+        pf, ps, pq = peso_forma, peso_scontri_eff, peso_quote
+        peso_storico = 1 - pf - ps - pq
 
-    if not quote_presenti:
-        peso_storico += peso_quote
-        peso_quote = 0
+    if not comp["quote_presenti"]:
+        peso_storico += pq
+        pq = 0
 
-    xG_casa = (peso_storico * xG_casa_storico +
-               peso_forma * xG_casa_forma +
-               peso_scontri * xG_casa_scontri)
-    xG_trasferta = (peso_storico * xG_trasf_storico +
-                    peso_forma * xG_trasf_forma +
-                    peso_scontri * xG_trasf_scontri)
+    # Storico+forma+scontri vanno rinormalizzati a sommare 1 tra loro: "quote" non
+    # entra nell'xG (entra dopo, sulle probabilità finali), altrimenti con peso_quote
+    # alto l'xG si schiaccia verso 0 invece di usare per intero il peso rimanente.
+    peso_xg_totale = peso_storico + pf + ps
+    if peso_xg_totale > 0:
+        xG_casa = (peso_storico * comp["xG_casa_storico"] + pf * comp["xG_casa_forma"] + ps * comp["xG_casa_scontri"]) / peso_xg_totale
+        xG_trasferta = (peso_storico * comp["xG_trasf_storico"] + pf * comp["xG_trasf_forma"] + ps * comp["xG_trasf_scontri"]) / peso_xg_totale
+    else:
+        xG_casa, xG_trasferta = comp["xG_casa_storico"], comp["xG_trasf_storico"]
 
-    # Il vantaggio campo è già incorporato sopra tramite media_gol_casa/media_gol_trasferta:
-    # non va riapplicato, altrimenti si torna a "vince sempre la casa" a prescindere dalle squadre.
+    matrice = distribuzione_punteggi(max(0.05, xG_casa), max(0.05, xG_trasferta), rho=rho)
+    esiti = esiti_da_matrice(matrice)
+    p_1_base, p_X_base, p_2_base = esiti["p_1"], esiti["p_X"], esiti["p_2"]
 
-    n_sim = 5000
-    gol_casa_sim = np.random.poisson(max(0.1, xG_casa), n_sim)
-    gol_trasferta_sim = np.random.poisson(max(0.1, xG_trasferta), n_sim)
-
-    p_1_base = np.sum(gol_casa_sim > gol_trasferta_sim) / n_sim
-    p_X_base = np.sum(gol_casa_sim == gol_trasferta_sim) / n_sim
-    p_2_base = np.sum(gol_casa_sim < gol_trasferta_sim) / n_sim
-
-    if quote_presenti:
-        p_1 = (1 - peso_quote) * p_1_base + peso_quote * prob_1_quote
-        p_X = (1 - peso_quote) * p_X_base + peso_quote * prob_X_quote
-        p_2 = (1 - peso_quote) * p_2_base + peso_quote * prob_2_quote
+    if comp["quote_presenti"]:
+        p_1 = (1 - pq) * p_1_base + pq * comp["prob_1_quote"]
+        p_X = (1 - pq) * p_X_base + pq * comp["prob_X_quote"]
+        p_2 = (1 - pq) * p_2_base + pq * comp["prob_2_quote"]
     else:
         p_1, p_X, p_2 = p_1_base, p_X_base, p_2_base
 
     return {"1": p_1, "X": p_X, "2": p_2, "pred": "1" if p_1 > p_X and p_1 > p_2 else ("X" if p_X > p_2 else "2")}
 
-def esegui_backtest(peso_forma, peso_scontri, peso_quote, mostra_progress=False):
-    predizioni, reali, stagioni_pred = [], [], []
+def predici_partita_bt(train_df_arg, test_df_arg, idx_test, peso_forma, peso_scontri, peso_quote,
+                       half_life_giorni, rho, n_partite_forma_val=5):
+    """Comodo per una singola previsione (test automatici, uso puntuale): calcola
+    componenti + valutazione in un solo passo. Il backtest sull'intero test set usa
+    invece precompute_componente/valuta_componente separati, per non ripetere il
+    calcolo costoso a ogni configurazione di pesi provata."""
+    comp = precompute_componente(idx_test, half_life_giorni, n_partite_forma_val)
+    if comp is None:
+        return None
+    return valuta_componente(comp, peso_forma, peso_scontri, peso_quote, rho)
+
+def precompute_tutte(half_life_giorni, n_partite_forma_val, mostra_progress=False):
+    componenti = []
     progress_bar = st.progress(0) if mostra_progress else None
     for i in range(len(test_df)):
-        pred = predici_partita_bt(train_df, test_df, i, stats, peso_forma, peso_scontri, peso_quote)
-        if pred is not None:
-            riga = test_df.iloc[i]
-            if riga["FTHG"] > riga["FTAG"]:
-                reale = "1"
-            elif riga["FTHG"] == riga["FTAG"]:
-                reale = "X"
-            else:
-                reale = "2"
-            predizioni.append(pred["pred"])
-            reali.append(reale)
-            stagioni_pred.append(str(riga["Stagione"]))
+        comp = precompute_componente(i, half_life_giorni, n_partite_forma_val)
+        if comp is not None:
+            componenti.append(comp)
         if mostra_progress:
             progress_bar.progress((i + 1) / len(test_df))
     if mostra_progress:
         progress_bar.empty()
-    return predizioni, reali, stagioni_pred
+    return componenti
+
+def valuta_tutte(componenti, peso_forma, peso_scontri, peso_quote, rho):
+    predizioni, reali, stagioni_pred, probabilita = [], [], [], []
+    for comp in componenti:
+        r = valuta_componente(comp, peso_forma, peso_scontri, peso_quote, rho)
+        predizioni.append(r["pred"])
+        reali.append(comp["esito"])
+        stagioni_pred.append(comp["stagione"])
+        # Ordine (1, 2, X) e non (1, X, 2): sklearn.log_loss richiede che le colonne
+        # di probabilita' siano nell'ordine lessicografico delle label, altrimenti
+        # calcola il log-loss sulle colonne sbagliate senza errore (bug silenzioso).
+        probabilita.append([r["1"], r["2"], r["X"]])
+    return predizioni, reali, stagioni_pred, probabilita
 
 # ------------------------------------------------------------
 # BOTTONE BACKTESTING
 # ------------------------------------------------------------
 if st.sidebar.button("🚀 Esegui Backtesting", width='stretch', type="primary"):
     with st.spinner("Simulando le previsioni... Questo potrebbe richiedere qualche minuto."):
-        predizioni, reali, stagioni_pred = esegui_backtest(peso_forma_bt, peso_scontri_bt, peso_quote_bt, mostra_progress=True)
+        componenti = precompute_tutte(emivita_giorni_bt, n_partite_forma, mostra_progress=True)
+        predizioni, reali, stagioni_pred, probabilita = valuta_tutte(
+            componenti, peso_forma_bt, peso_scontri_bt, peso_quote_bt, rho_bt)
 
         # Metriche
         acc = accuracy_score(reali, predizioni)
         cm = confusion_matrix(reali, predizioni, labels=["1", "X", "2"])
         precision, recall, f1, support = precision_recall_fscore_support(reali, predizioni, labels=["1", "X", "2"])
         benchmark = reali.count("1") / len(reali)  # accuratezza di "predici sempre 1", calcolata sul test set reale
+
+        # Metriche probabilistiche: l'accuratezza da sola premia previsioni "decise"
+        # anche se mal calibrate, RPS e log-loss no.
+        rps_medio = np.mean([rps({"1": p[0], "X": p[2], "2": p[1]}, r) for p, r in zip(probabilita, reali)])
+        logloss = log_loss(reali, probabilita, labels=["1", "2", "X"])
 
         # ------------------------------------------------------------
         # VISUALIZZA RISULTATI
@@ -281,10 +315,12 @@ if st.sidebar.button("🚀 Esegui Backtesting", width='stretch', type="primary")
             corrette = sum(1 for p, r in zip(predizioni, reali) if p == r)
             st.markdown(f"""<div class="metric-card blue"><div class="metric-value">{corrette}/{len(reali)}</div><div class="metric-label">Partite indovinate</div></div>""", unsafe_allow_html=True)
         with col_m3:
-            f1_avg = np.mean(f1)
-            st.markdown(f"""<div class="metric-card purple"><div class="metric-value">{f1_avg:.1%}</div><div class="metric-label">F1 Score medio</div></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="metric-card purple"><div class="metric-value">{rps_medio:.3f}</div><div class="metric-label">RPS medio (0=perfetto)</div></div>""", unsafe_allow_html=True)
         with col_m4:
-            st.markdown(f"""<div class="metric-card orange"><div class="metric-value">{'✅' if acc > benchmark else '❌'}</div><div class="metric-label">vs Benchmark "sempre 1" ({benchmark:.0%})</div></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="metric-card orange"><div class="metric-value">{logloss:.3f}</div><div class="metric-label">Log-loss (più basso meglio)</div></div>""", unsafe_allow_html=True)
+
+        st.caption(f"Accuratezza vs benchmark \"predici sempre 1\" ({benchmark:.0%}): {'✅ sopra' if acc > benchmark else '❌ sotto'}. "
+                   "RPS e log-loss valutano quanto sono ben calibrate le probabilità, non solo se la previsione più probabile è quella giusta.")
 
         # Matrice di confusione
         st.markdown("---")
@@ -342,13 +378,20 @@ if st.sidebar.button("🔬 Confronta configurazioni", width='stretch'):
         ("Storico + Forma", 0.5, 0.0, 0.0),
         ("Vecchio default (storico+forma+scontri+quote)", 0.5, 0.15, 0.15),
         ("Solo quote bookmaker", 0.0, 0.0, 1.0),
-        ("Ottimale da grid search (nuovo default)", 0.0, 0.15, 0.85),
+        ("Ottimale da grid search", 0.0, 0.15, 0.85),
     ]
+    with st.spinner("Calcolo le componenti (storico, forma, scontri, quote) una sola volta..."):
+        componenti = precompute_tutte(emivita_giorni_bt, n_partite_forma, mostra_progress=True)
+
     risultati_confronto = []
-    with st.spinner("Eseguo il backtest per le configurazioni di riferimento..."):
-        for nome, pf, ps, pq in configurazioni:
-            predizioni_c, reali_c, _ = esegui_backtest(pf, ps, pq)
-            risultati_confronto.append({"Configurazione": nome, "Accuratezza": accuracy_score(reali_c, predizioni_c)})
+    for nome, pf, ps, pq in configurazioni:
+        predizioni_c, reali_c, _, probabilita_c = valuta_tutte(componenti, pf, ps, pq, rho_bt)
+        rps_c = np.mean([rps({"1": p[0], "X": p[2], "2": p[1]}, r) for p, r in zip(probabilita_c, reali_c)])
+        risultati_confronto.append({
+            "Configurazione": nome,
+            "Accuratezza": accuracy_score(reali_c, predizioni_c),
+            "RPS medio": rps_c,
+        })
 
     st.markdown("---")
     st.markdown("### 🔬 Confronto tra Configurazioni del Modello")
@@ -356,11 +399,11 @@ if st.sidebar.button("🔬 Confronta configurazioni", width='stretch'):
     fig_confronto = go.Figure(go.Bar(
         x=df_confronto["Configurazione"], y=df_confronto["Accuratezza"],
         text=[f"{a:.1%}" for a in df_confronto["Accuratezza"]], textposition="outside",
-        marker_color=["#3498db", "#2ecc71", "#9b59b6", "#e67e22"]
+        marker_color=["#3498db", "#2ecc71", "#9b59b6", "#e67e22", "#1abc9c"]
     ))
     fig_confronto.update_layout(height=400, yaxis_tickformat=".0%", yaxis_title="Accuratezza 1X2", yaxis_range=[0, 1])
     st.plotly_chart(fig_confronto, width='stretch')
-    st.dataframe(df_confronto.style.format({"Accuratezza": "{:.1%}"}), hide_index=True, width='stretch')
+    st.dataframe(df_confronto.style.format({"Accuratezza": "{:.1%}", "RPS medio": "{:.3f}"}), hide_index=True, width='stretch')
 
 st.markdown("---")
 st.caption("📊 Backtesting walk-forward: le stagioni di test sono sempre le più recenti, quelle precedenti sono usate per l'addestramento.")
