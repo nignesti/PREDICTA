@@ -1,0 +1,22 @@
+# Ambiente virtuale
+venv/
+
+# File Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Database locali
+*.db
+*.sqlite
+
+# File di sistema
+.DS_Store
+Thumbs.db
+
+# Dati (se il CSV è troppo grande)
+# serie_a.csv
+
+# Streamlit
+.streamlit/
