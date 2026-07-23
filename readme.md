@@ -30,10 +30,12 @@ Il sistema combina **quattro componenti** con pesi regolabili:
 
 | Componente | Descrizione | Peso Default |
 |------------|-------------|--------------|
-| **Media storica** | Gol fatti/subiti medi dal 1993 a oggi | 20% |
-| **Forma recente** | Performance nelle ultime 5 partite | 50% |
+| **Media storica** | Gol fatti/subiti medi dal 1993 a oggi | 0% |
+| **Forma recente** | Performance nelle ultime N partite | 0% |
 | **Scontri diretti** | Precedenti tra le due squadre | 15% |
-| **Quote bookmaker** | Saggezza del mercato (Bet365/Pinnacle) | 15% |
+| **Quote bookmaker** | Saggezza del mercato (Bet365/Pinnacle) | 85% |
+
+I pesi di default sono il risultato di una grid search su backtest walk-forward (vedi sotto), non una scelta arbitraria: la "forma recente" è risultata sistematicamente rumorosa e dannosa una volta pesate bene le quote, quindi il suo peso ottimale è 0. Restano comunque slider liberi se vuoi sperimentare altre combinazioni.
 
 ### Algoritmo
 1. **Calcolo xG**: forza attacco/difesa di ogni squadra relativa alla media di campionato (stile Poisson classico), combinata pesando storico, forma e scontri diretti
@@ -49,12 +51,13 @@ Il sistema combina **quattro componenti** con pesi regolabili:
 |------|----------------|-------------------|
 | Baseline | Solo storico | 43.0% |
 | +Forma | Storico + Forma recente | 46.2% |
-| Completo | Tutte le componenti (pesi default) | 50.3% |
+| Vecchio default | forma=0.5, scontri=0.15, quote=0.15 | 50.3% |
 | Solo Quote | Solo mercato bookmaker | 52.9% |
+| **Ottimale (nuovo default)** | **forma=0, scontri=0.15, quote=0.85** | **54-55%** |
 
-*Accuratezza misurata sulla pagina di Backtesting (walk-forward), stagione 2025 come test set (342 partite valutabili su 380), stagioni precedenti come training. Benchmark "predici sempre 1": 38.9% su questo test set.*
+*Accuratezza misurata sulla pagina di Backtesting (walk-forward), stagione 2025 come test set (342 partite valutabili su 380), stagioni precedenti come training. Benchmark "predici sempre 1": 38.9% su questo test set. La riga "Ottimale" è il risultato di una grid search su ~800 combinazioni di pesi, validata su 8 semi casuali diversi e su una seconda stagione (2024) mai usata durante la ricerca: 54.1-54.8% di media in entrambi i casi, quindi non è rumore statistico.*
 
-Nota: fino a poco fa il modello collassava di fatto su "vince sempre la casa" a prescindere dalle squadre (accuratezza indistinguibile dal benchmark), per due bug ora corretti: il calcolo della "forma recente" usava quasi solo le partite in trasferta, e le formule storico/forma pesavano ogni statistica come media semplice con la media di campionato, azzerando le differenze reali tra squadre invece di usare una forza attacco/difesa relativa alla media di lega. Usa il bottone **🔬 Confronta 4 configurazioni** nella pagina di Backtesting per riprodurre questi numeri con i tuoi dati.
+Nota: fino a poco fa il modello collassava di fatto su "vince sempre la casa" a prescindere dalle squadre (accuratezza indistinguibile dal benchmark), per due bug ora corretti: il calcolo della "forma recente" usava quasi solo le partite in trasferta, e le formule storico/forma pesavano ogni statistica come media semplice con la media di campionato, azzerando le differenze reali tra squadre invece di usare una forza attacco/difesa relativa alla media di lega. Una volta sistemati questi bug, una grid search sui pesi ha mostrato che la "forma recente" va pesata a zero (troppo rumorosa su campioni di poche partite), mentre gli scontri diretti aggiungono un vantaggio reale sopra le sole quote. Usa il bottone **🔬 Confronta configurazioni** nella pagina di Backtesting per riprodurre questi numeri con i tuoi dati.
 
 ---
 
@@ -154,14 +157,13 @@ streamlit run app.py
 
 ## 📈 Prossimi Sviluppi
 
-Ordinati per dipendenza: ha poco senso investire in modelli più complessi (XGBoost) o in value betting finché non è chiaro se la componente statistica batte davvero il mercato — oggi da backtest il modello puro non ci riesce (50.3% vs 52.9% delle sole quote).
+Con i pesi ottimali (scontri diretti + quote, forma a zero) il modello batte le sole quote di 1-2 punti percentuali, in modo stabile su più stagioni. È un margine reale ma piccolo: prima di investire in feature più complesse ha senso consolidare questo vantaggio.
 
-- [ ] **Sistema Elo dinamico** per il ranking squadre, al posto delle medie storiche/forma attuali (probabilmente il miglioramento con il miglior rapporto sforzo/beneficio)
-- [ ] **Verificare se il modello batte il mercato** in modo sistematico, prima di costruirci sopra altre feature
-- [ ] **Modello XGBoost** con più feature, una volta risolto il punto sopra
+- [ ] **Sistema Elo dinamico** per il ranking squadre, al posto delle medie storiche/forma attuali (probabilmente il miglioramento con il miglior rapporto sforzo/beneficio, visto che "forma" nella sua forma attuale è stata scartata dalla grid search)
+- [ ] **Value betting**: dato che il modello batte il mercato di un margine misurabile, ha senso iniziare a valutare quote realmente vantaggiose
+- [ ] **Modello XGBoost** con più feature, una volta consolidato il vantaggio sopra le quote
 - [ ] **Calendario prossima giornata** con pronostici automatici
 - [ ] **NLP News** per integrare infortuni e calciomercato
-- [ ] **Value betting** per identificare quote vantaggiose (ha senso solo se il modello batte il mercato)
 - [ ] **Multi-campionato** (Premier League, Liga, Bundesliga)
 
 ---

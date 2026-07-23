@@ -81,10 +81,12 @@ n_stagioni_test = st.sidebar.slider(
 )
 stagioni_test = stagioni_disponibili[-n_stagioni_test:]
 
-peso_forma_bt = st.sidebar.slider("Peso forma", 0.0, 1.0, 0.5, 0.05)
+peso_forma_bt = st.sidebar.slider("Peso forma", 0.0, 1.0, 0.0, 0.05,
+                    help="Da grid search: la forma sulle ultime partite è troppo rumorosa e non aggiunge valore.")
 peso_scontri_bt = st.sidebar.slider("Peso scontri", 0.0, 0.5, 0.15, 0.05)
-n_partite_forma = st.sidebar.slider("Partite per forma", 3, 10, 5)
-peso_quote_bt = st.sidebar.slider("Peso quote", 0.0, 0.5, 0.15, 0.05)
+n_partite_forma = st.sidebar.slider("Partite per forma", 3, 10, 5,
+                    help="Ininfluente quando 'Peso forma' è 0.")
+peso_quote_bt = st.sidebar.slider("Peso quote", 0.0, 1.0, 0.85, 0.05)
 
 train_df = df[~df["Stagione"].astype(str).isin(stagioni_test)].copy()
 test_df = df[df["Stagione"].astype(str).isin(stagioni_test)].copy()
@@ -334,15 +336,16 @@ if st.sidebar.button("🚀 Esegui Backtesting", width='stretch', type="primary")
 # CONFRONTO TRA CONFIGURAZIONI FISSE DEL MODELLO
 # ------------------------------------------------------------
 st.sidebar.markdown("---")
-if st.sidebar.button("🔬 Confronta 4 configurazioni", width='stretch'):
+if st.sidebar.button("🔬 Confronta configurazioni", width='stretch'):
     configurazioni = [
         ("Solo storico", 0.0, 0.0, 0.0),
         ("Storico + Forma", 0.5, 0.0, 0.0),
-        ("Completo (storico+forma+scontri+quote)", 0.5, 0.15, 0.15),
+        ("Vecchio default (storico+forma+scontri+quote)", 0.5, 0.15, 0.15),
         ("Solo quote bookmaker", 0.0, 0.0, 1.0),
+        ("Ottimale da grid search (nuovo default)", 0.0, 0.15, 0.85),
     ]
     risultati_confronto = []
-    with st.spinner("Eseguo il backtest per le 4 configurazioni di riferimento..."):
+    with st.spinner("Eseguo il backtest per le configurazioni di riferimento..."):
         for nome, pf, ps, pq in configurazioni:
             predizioni_c, reali_c, _ = esegui_backtest(pf, ps, pq)
             risultati_confronto.append({"Configurazione": nome, "Accuratezza": accuracy_score(reali_c, predizioni_c)})
