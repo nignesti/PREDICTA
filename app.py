@@ -70,11 +70,12 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("#### 🎚️ Pesi del Modello")
-    peso_forma = st.slider("Forma recente", 0.0, 1.0, 0.0, 0.05,
-                       help="Da backtest, la forma sulle ultime partite è troppo rumorosa: pesa meno delle quote.")
-    peso_scontri = st.slider("Scontri diretti", 0.0, 0.5, 0.15, 0.05)
-    peso_quote = st.slider("Quote bookmaker", 0.0, 1.0, 0.85, 0.05,
-                       help="Peso delle quote storiche Bet365/Pinnacle. Pesi di default ottimizzati via backtest walk-forward.")
+    peso_forma = st.slider("Forma recente", 0.0, 1.0, 0.10, 0.05,
+                       help="Validato su 3 stagioni indipendenti: un peso piccolo aiuta, oltre 0.20-0.25 peggiora e diventa rumore.")
+    peso_scontri = st.slider("Scontri diretti", 0.0, 0.5, 0.0, 0.05,
+                       help="Su 3 stagioni di backtest non aggiunge valore misurabile una volta pesate bene le quote: default a 0.")
+    peso_quote = st.slider("Quote bookmaker", 0.0, 1.0, 0.90, 0.05,
+                       help="Peso delle quote storiche Bet365/Pinnacle. Pesi di default validati su 3 stagioni indipendenti di backtest.")
     peso_storico = 1 - peso_forma - peso_scontri - peso_quote
 
     if peso_storico < 0:
@@ -148,7 +149,7 @@ def scontri_diretti(df, squadra1, squadra2, ultimi_n=10):
 stats = stats_pesate_squadre(df, data_riferimento=df["Date"].max(), half_life_giorni=EMIVITA_GIORNI)
 
 def stima_probabilita(df, stats, squadra_casa, squadra_trasferta,
-                      peso_forma=0.0, peso_scontri=0.15, peso_quote=0.85):
+                      peso_forma=0.10, peso_scontri=0.0, peso_quote=0.90):
     """
     Combina: storico + forma + scontri diretti + quote dei bookmaker
     """

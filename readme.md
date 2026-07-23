@@ -18,9 +18,9 @@ Dashboard predittiva per partite di Serie A basata su machine learning, analisi 
 
 ### Backtesting
 - **Validazione walk-forward** su 1-5 stagioni recenti a scelta (ognuna ~380 partite)
-- **Metriche**: Accuratezza 1X2, F1 Score, Matrice di Confusione, breakdown per stagione
-- **Confronto tra modelli**: solo storico, storico+forma, completo, solo quote
-- **Ottimizzazione dei pesi** per massimizzare l'accuratezza
+- **Metriche**: Accuratezza 1X2, F1 Score, RPS e Log-loss (calibrazione delle probabilità, non solo la previsione più probabile), Matrice di Confusione, breakdown per stagione
+- **Confronto tra configurazioni**: solo storico, storico+forma, vecchi default, solo quote, ottimale validato
+- **Iperparametri Dixon-Coles regolabili**: emivita delle statistiche storiche e correzione tau per i pareggi
 
 ---
 
@@ -30,34 +30,44 @@ Il sistema combina **quattro componenti** con pesi regolabili:
 
 | Componente | Descrizione | Peso Default |
 |------------|-------------|--------------|
-| **Media storica** | Gol fatti/subiti medi dal 1993 a oggi | 0% |
-| **Forma recente** | Performance nelle ultime N partite | 0% |
-| **Scontri diretti** | Precedenti tra le due squadre | 15% |
-| **Quote bookmaker** | Saggezza del mercato (Bet365/Pinnacle) | 85% |
+| **Media storica** | Gol fatti/subiti, pesati con decadimento temporale (le partite recenti contano di più) | 0% |
+| **Forma recente** | Performance nelle ultime N partite | 10% |
+| **Scontri diretti** | Precedenti tra le due squadre | 0% |
+| **Quote bookmaker** | Saggezza del mercato (consenso multi-bookmaker, Bet365/Pinnacle a seguire) | 90% |
 
-I pesi di default sono il risultato di una grid search su backtest walk-forward (vedi sotto), non una scelta arbitraria: la "forma recente" è risultata sistematicamente rumorosa e dannosa una volta pesate bene le quote, quindi il suo peso ottimale è 0. Restano comunque slider liberi se vuoi sperimentare altre combinazioni.
+I pesi di default sono il risultato di una grid search su backtest walk-forward, **validata su tre stagioni indipendenti** (2023, 2024, 2025) e non solo su quella usata per cercarli — vedi la sezione Risultati sotto per i dettagli. Il risultato più sorprendente: né lo storico pesato nel tempo né gli scontri diretti aggiungono valore misurabile una volta pesate bene le quote (probabilmente perché il mercato incorpora già efficientemente quell'informazione); un piccolo peso alla forma recentissima invece aiuta in modo consistente. Restano comunque slider liberi se vuoi sperimentare altre combinazioni.
 
 ### Algoritmo
 1. **Calcolo xG**: forza attacco/difesa di ogni squadra relativa alla media di campionato (stile Poisson classico), combinata pesando storico, forma e scontri diretti
 2. **Vantaggio casa**: incorporato direttamente nelle formule (medie gol casa/trasferta separate), non come correzione aggiuntiva
-3. **Simulazione Monte Carlo**: 10.000 partite simulate con distribuzione di Poisson
-4. **Blend quote**: le probabilità finali fondono il modello statistico con le probabilità implicite delle quote
+3. **Decadimento temporale**: le statistiche storiche pesano ogni partita con un decadimento esponenziale (emivita configurabile, default 730 giorni) invece di una media semplice su 33 stagioni
+4. **Distribuzione esatta dei punteggi**: calcolo diretto della matrice di probabilità Poisson (non più simulazione Monte Carlo), con la **correzione tau di Dixon & Coles (1997)** per i punteggi bassi — un Poisson indipendente puro sottostima sistematicamente i pareggi
+5. **Blend quote**: le probabilità finali fondono il modello statistico con le probabilità implicite delle quote
 
 ---
 
 ## 📊 Risultati Backtesting
 
-| Test | Configurazione | Accuratezza misurata |
-|------|----------------|-------------------|
-| Baseline | Solo storico | 43.0% |
-| +Forma | Storico + Forma recente | 46.2% |
-| Vecchio default | forma=0.5, scontri=0.15, quote=0.15 | 50.3% |
-| Solo Quote | Solo mercato bookmaker | 52.9% |
-| **Ottimale (nuovo default)** | **forma=0, scontri=0.15, quote=0.85** | **54-55%** |
+Validati su **tre stagioni di test indipendenti** (2023, 2024, 2025), ognuna con le stagioni precedenti come training — non solo sull'unica stagione su cui è girata la grid search, per escludere che i pesi scelti fossero semplicemente rumore statistico:
 
-*Accuratezza misurata sulla pagina di Backtesting (walk-forward), stagione 2025 come test set (342 partite valutabili su 380), stagioni precedenti come training. Benchmark "predici sempre 1": 38.9% su questo test set. La riga "Ottimale" è il risultato di una grid search su ~800 combinazioni di pesi, validata su 8 semi casuali diversi e su una seconda stagione (2024) mai usata durante la ricerca: 54.1-54.8% di media in entrambi i casi, quindi non è rumore statistico.*
+| Configurazione | Acc. 2025 | Acc. 2024 | Acc. 2023 | **Media** |
+|---|---|---|---|---|
+| Solo storico (pesato nel tempo) | 43-46%* | - | - | ~44% |
+| Solo mercato (quote) | 54.4% | 52.6% | 54.7% | 53.9% |
+| Vecchio default (forma=0.5, scontri=0.15, quote=0.15) | 50.3% | - | - | ~50% |
+| Default precedente (forma=0, scontri=0.15, quote=0.85) | 54.1% | 53.4% | 52.9% | 53.5% |
+| **Nuovo default (forma=0.10, scontri=0, quote=0.90)** | **56.2%** | **53.7%** | **54.7%** | **54.9%** |
 
-Nota: fino a poco fa il modello collassava di fatto su "vince sempre la casa" a prescindere dalle squadre (accuratezza indistinguibile dal benchmark), per due bug ora corretti: il calcolo della "forma recente" usava quasi solo le partite in trasferta, e le formule storico/forma pesavano ogni statistica come media semplice con la media di campionato, azzerando le differenze reali tra squadre invece di usare una forza attacco/difesa relativa alla media di lega. Una volta sistemati questi bug, una grid search sui pesi ha mostrato che la "forma recente" va pesata a zero (troppo rumorosa su campioni di poche partite), mentre gli scontri diretti aggiungono un vantaggio reale sopra le sole quote. Usa il bottone **🔬 Confronta configurazioni** nella pagina di Backtesting per riprodurre questi numeri con i tuoi dati.
+*\*Numero di riferimento dalla validazione iniziale su una sola stagione, prima dell'introduzione del decadimento temporale.*
+
+*Benchmark "predici sempre 1" sul test 2025: 38.9%. Oltre all'accuratezza, il backtesting misura anche RPS e log-loss (calibrazione delle probabilità): sulla configurazione ottimale, RPS medio ≈ 0.188 sulle tre stagioni (più basso è meglio; una previsione uniforme dà circa 0.28, una perfetta dà 0). Usa il bottone **🔬 Confronta configurazioni** nella pagina di Backtesting per riprodurre questi numeri con i tuoi dati.*
+
+**Cosa abbiamo imparato costruendo questi numeri (in ordine cronologico di scoperta):**
+1. Il calcolo della "forma recente" usava quasi solo le partite in trasferta invece delle ultime N in ordine cronologico — bug corretto.
+2. Le formule storico/forma pesavano ogni statistica come media semplice con la media di campionato, azzerando le differenze reali tra squadre e facendo collassare il modello su "vince sempre la casa" — corretto usando una forza attacco/difesa relativa alla media di lega (stile Poisson classico).
+3. **Il dataset conteneva un bug serio**: `stagioni/2010.txt` era una copia esatta di `stagioni/2009.txt` — la stagione 2009/10 era contata due volte e la 2010/11 mancava del tutto. Corretto sostituendo il file con i dati reali della stagione mancante.
+4. Con `peso_quote` alto, storico+forma+scontri non venivano rinormalizzati a sommare 1 tra loro: l'xG stimato collassava verso 0 (es. 0.24 gol attesi invece di ~1.6) perché le "quote" non entrano nel calcolo dell'xG ma nel blend finale delle probabilità — bug corretto.
+5. Con tutti i bug corretti e il modello validato su tre stagioni indipendenti: **né lo storico né gli scontri diretti aggiungono valore misurabile sopra le sole quote di mercato**; solo un peso piccolo (10%) alla forma recentissima aiuta in modo consistente. Il vantaggio del modello completo sopra il solo mercato è reale ma modesto: **circa 1 punto percentuale di accuratezza media**, misurato onestamente su dati mai visti dalla fase di ricerca dei pesi.
 
 ---
 
@@ -66,7 +76,8 @@ Nota: fino a poco fa il modello collassava di fatto su "vince sempre la casa" a 
 - **Python 3.10+** (sviluppato e testato con Python 3.14)
 - **Streamlit** - Dashboard interattiva
 - **Pandas** - Manipolazione dati
-- **NumPy** - Calcoli numerici e simulazioni
+- **NumPy** - Calcoli numerici
+- **SciPy** - Distribuzione di Poisson per il modello Dixon-Coles
 - **Plotly** - Grafici interattivi
 - **Scikit-learn** - Metriche di validazione
 - **Pytest** - Test automatici sul modello (vedi `tests/`)
@@ -78,7 +89,8 @@ Nota: fino a poco fa il modello collassava di fatto su "vince sempre la casa" a 
 ```
 serie-a-dashboard/
 ├── app.py                  # Dashboard principale
-├── unisci_dati.py          # Script per unire i CSV stagionali (aggiunge anche la colonna Stagione)
+├── modello.py              # Modulo condiviso: Dixon-Coles, decadimento temporale, RPS
+├── unisci_dati.py          # Script per unire i CSV stagionali (Date, Stagione, quota di consenso)
 ├── test_dati.py            # Script di ispezione rapida di un file stagione
 ├── serie_a.csv             # Dataset completo (11.534 partite)
 ├── requirements.txt        # Dipendenze Python pinnate
@@ -149,19 +161,20 @@ streamlit run app.py
 
 ### Backtesting
 1. Clicca su **Backtesting** nella sidebar di Streamlit
-2. Scegli quante stagioni recenti usare come test (walk-forward: quelle precedenti sono training) e imposta i pesi del modello
-3. Clicca **🚀 Esegui Backtesting** per validare i pesi scelti, oppure **🔬 Confronta 4 configurazioni** per vedere fianco a fianco solo storico / storico+forma / completo / solo quote
-4. Visualizza accuratezza, matrice di confusione, metriche per classe e (se selezioni più stagioni) l'accuratezza stagione per stagione
+2. Scegli quante stagioni recenti usare come test (walk-forward: quelle precedenti sono training), imposta i pesi del modello e gli iperparametri Dixon-Coles (emivita, rho)
+3. Clicca **🚀 Esegui Backtesting** per validare i pesi scelti, oppure **🔬 Confronta configurazioni** per vedere fianco a fianco solo storico / storico+forma / vecchi default / solo quote / ottimale
+4. Visualizza accuratezza, RPS, log-loss, matrice di confusione, metriche per classe e (se selezioni più stagioni) l'accuratezza stagione per stagione
 
 ---
 
 ## 📈 Prossimi Sviluppi
 
-Con i pesi ottimali (scontri diretti + quote, forma a zero) il modello batte le sole quote di 1-2 punti percentuali, in modo stabile su più stagioni. È un margine reale ma piccolo: prima di investire in feature più complesse ha senso consolidare questo vantaggio.
+Con i pesi validati (forma leggera + quote) il modello batte le sole quote di ~1 punto percentuale medio, in modo stabile su tre stagioni indipendenti. È un margine reale ma piccolo: prima di investire in feature più complesse ha senso capire perché storico e scontri diretti, anche dopo averli sistemati (decadimento temporale, forza relativa alla media di lega), non aggiungono valore — probabile indizio che il mercato incorpora già quell'informazione meglio di come possiamo farlo con le sole medie sui gol.
 
-- [ ] **Sistema Elo dinamico** per il ranking squadre, al posto delle medie storiche/forma attuali (probabilmente il miglioramento con il miglior rapporto sforzo/beneficio, visto che "forma" nella sua forma attuale è stata scartata dalla grid search)
-- [ ] **Value betting**: dato che il modello batte il mercato di un margine misurabile, ha senso iniziare a valutare quote realmente vantaggiose
-- [ ] **Modello XGBoost** con più feature, una volta consolidato il vantaggio sopra le quote
+- [ ] **Sistema Elo o pi-ratings dinamico**: un rating che si aggiorna partita per partita potrebbe catturare la "forza vera" di una squadra meglio delle medie storiche/forma attuali, che nonostante il decadimento temporale non hanno ancora battuto il mercato da sole
+- [ ] **Expected Goals (xG) reali** al posto dei gol effettivi come base per storico/forma: i gol sono rumorosi, l'xG lo è meno (fonti: Understat, FBref)
+- [ ] **Value betting**: dato che il modello batte il mercato di un margine misurabile, ha senso iniziare a valutare quote realmente vantaggiose — ma il margine è piccolo, quindi da trattare con cautela
+- [ ] **Modello XGBoost** con più feature (Elo, xG, riposo tra partite), una volta consolidato un vantaggio sopra le quote più ampio dell'attuale ~1%
 - [ ] **Calendario prossima giornata** con pronostici automatici
 - [ ] **NLP News** per integrare infortuni e calciomercato
 - [ ] **Multi-campionato** (Premier League, Liga, Bundesliga)
@@ -179,10 +192,10 @@ La dashboard principale permette di scegliere **qualsiasi coppia di squadre** pr
 ## 📊 Dataset
 
 - **Fonte**: [Football-Data.co.uk](https://www.football-data.co.uk/italym.php)
-- **Periodo**: 1993 - 2025
-- **Partite**: 11.534
+- **Periodo**: 1993 - 2026 (stagione 2025/26 in corso)
+- **Partite**: 11.534, tutte le 33 stagioni presenti senza duplicati né buchi (verificato: nessuna partita duplicata, nessuna stagione mancante tra la prima e l'ultima — controllo automatico in `tests/test_model.py`)
 - **Squadre**: 53
-- **Colonne**: HomeTeam, AwayTeam, FTHG, FTAG, FTR, Stagione, B365H, B365D, B365A, PSH, PSD, PSA
+- **Colonne**: Date, HomeTeam, AwayTeam, FTHG, FTAG, FTR, Stagione, OddsAvgH/D/A (quota di consenso multi-bookmaker), B365H/D/A, PSH/D/A, oltre a tiri/corner/cartellini quando disponibili (non ancora usati dal modello)
 
 ---
 

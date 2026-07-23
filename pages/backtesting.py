@@ -84,12 +84,13 @@ n_stagioni_test = st.sidebar.slider(
 )
 stagioni_test = stagioni_disponibili[-n_stagioni_test:]
 
-peso_forma_bt = st.sidebar.slider("Peso forma", 0.0, 1.0, 0.0, 0.05,
-                    help="Da grid search: la forma sulle ultime partite è troppo rumorosa e non aggiunge valore.")
-peso_scontri_bt = st.sidebar.slider("Peso scontri", 0.0, 0.5, 0.15, 0.05)
-n_partite_forma = st.sidebar.slider("Partite per forma", 3, 10, 5,
-                    help="Ininfluente quando 'Peso forma' è 0.")
-peso_quote_bt = st.sidebar.slider("Peso quote", 0.0, 1.0, 0.85, 0.05)
+peso_forma_bt = st.sidebar.slider("Peso forma", 0.0, 1.0, 0.10, 0.05,
+                    help="Validato su 3 stagioni indipendenti: un peso piccolo aiuta, oltre 0.20-0.25 peggiora.")
+peso_scontri_bt = st.sidebar.slider("Peso scontri", 0.0, 0.5, 0.0, 0.05,
+                    help="Su 3 stagioni di backtest non aggiunge valore misurabile una volta pesate bene le quote.")
+n_partite_forma = st.sidebar.slider("Partite per forma", 3, 10, 3,
+                    help="Poco sensibile in questo range; 3 e' risultato leggermente migliore nella grid search.")
+peso_quote_bt = st.sidebar.slider("Peso quote", 0.0, 1.0, 0.90, 0.05)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("#### 🧮 Iperparametri Dixon-Coles")
@@ -376,9 +377,10 @@ if st.sidebar.button("🔬 Confronta configurazioni", width='stretch'):
     configurazioni = [
         ("Solo storico", 0.0, 0.0, 0.0),
         ("Storico + Forma", 0.5, 0.0, 0.0),
-        ("Vecchio default (storico+forma+scontri+quote)", 0.5, 0.15, 0.15),
+        ("Primo default (storico+forma+scontri+quote)", 0.5, 0.15, 0.15),
         ("Solo quote bookmaker", 0.0, 0.0, 1.0),
-        ("Ottimale da grid search", 0.0, 0.15, 0.85),
+        ("Secondo default (forma=0,scontri=0.15,quote=0.85)", 0.0, 0.15, 0.85),
+        ("Ottimale validato su 3 stagioni (nuovo default)", 0.10, 0.0, 0.90),
     ]
     with st.spinner("Calcolo le componenti (storico, forma, scontri, quote) una sola volta..."):
         componenti = precompute_tutte(emivita_giorni_bt, n_partite_forma, mostra_progress=True)
@@ -399,7 +401,7 @@ if st.sidebar.button("🔬 Confronta configurazioni", width='stretch'):
     fig_confronto = go.Figure(go.Bar(
         x=df_confronto["Configurazione"], y=df_confronto["Accuratezza"],
         text=[f"{a:.1%}" for a in df_confronto["Accuratezza"]], textposition="outside",
-        marker_color=["#3498db", "#2ecc71", "#9b59b6", "#e67e22", "#1abc9c"]
+        marker_color=["#3498db", "#2ecc71", "#9b59b6", "#e67e22", "#95a5a6", "#1abc9c"]
     ))
     fig_confronto.update_layout(height=400, yaxis_tickformat=".0%", yaxis_title="Accuratezza 1X2", yaxis_range=[0, 1])
     st.plotly_chart(fig_confronto, width='stretch')
