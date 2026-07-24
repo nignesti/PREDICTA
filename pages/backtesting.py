@@ -6,7 +6,8 @@ import plotly.express as px
 from sklearn.metrics import accuracy_score, confusion_matrix, precision_recall_fscore_support, log_loss
 
 from modello import (stats_pesate_squadre, distribuzione_punteggi, esiti_da_matrice, rps,
-                     prepara_elo, elo_asof_batch, calibra_regressione_elo, xg_da_elo_calibrato)
+                     prepara_elo, elo_asof_batch, calibra_regressione_elo, xg_da_elo_calibrato,
+                     probabilita_shin)
 
 st.set_page_config(page_title="PredictA — Backtesting", page_icon=":material/bar_chart:", layout="wide")
 
@@ -59,6 +60,15 @@ with st.sidebar.container(border=True):
     peso_elo_bt = st.slider("Elo (ClubElo.com)", 0.0, 1.0, 0.0, 0.05,
                         help="Rating Elo storico da clubelo.com, non ancora validato: default a 0 finché non testato.")
     peso_quote_bt = st.slider("Quote bookmaker", 0.0, 1.0, 0.90, 0.05)
+    metodo_quote_bt = st.selectbox(
+        "Metodo conversione quote", ["Shin (1992/1993)", "Proporzionale (1/quota)"],
+        help="Come si tolgono le probabilita' vere dalle quote del bookmaker (che includono un margine). "
+             "Shin ripartisce il margine in modo non uniforme (più margine alle quote alte, corregge la "
+             "favorite-longshot bias); proporzionale lo rimuove in modo uniforme tra gli esiti. Validato su 3 "
+             "stagioni indipendenti: Shin migliora leggermente l'RPS (calibrazione) in tutte e 3, accuratezza "
+             "sostanzialmente invariata (-0.08 punti percentuali in media, dentro il rumore). Default: Shin.",
+    )
+    metodo_quote_bt = "shin" if metodo_quote_bt.startswith("Shin") else "proporzionale"
 
 with st.sidebar.container(border=True):
     st.markdown("**Iperparametri Dixon-Coles**")
@@ -124,12 +134,14 @@ def scontri_diretti_bt(df_prima, squadra1, squadra2, ultimi_n=10):
             gol_fatti_s1.append(row["FTAG"]); gol_subiti_s1.append(row["FTHG"])
     return np.mean(gol_fatti_s1), np.mean(gol_subiti_s1)
 
-def precompute_componente(idx_test, half_life_giorni, n_partite_forma, elo_casa=None, elo_trasferta=None):
+def precompute_componente(idx_test, half_life_giorni, n_partite_forma, elo_casa=None, elo_trasferta=None,
+                          metodo_quote="proporzionale"):
     """Calcola le componenti costose (storico pesato nel tempo, forma, scontri
-    diretti, quote) per una partita di test. Dipendono solo da half_life_giorni e
-    n_partite_forma, MAI dai pesi forma/scontri/quote: si possono quindi calcolare
-    una volta sola e riusare per confrontare più configurazioni di pesi. I rating
-    Elo (se passati) sono già stati calcolati in batch da precompute_tutte."""
+    diretti, quote) per una partita di test. Dipendono solo da half_life_giorni,
+    n_partite_forma e metodo_quote, MAI dai pesi forma/scontri/quote: si possono
+    quindi calcolare una volta sola e riusare per confrontare più configurazioni
+    di pesi. I rating Elo (se passati) sono già stati calcolati in batch da
+    precompute_tutte."""
     riga = test_df.iloc[idx_test]
     casa = riga["HomeTeam"]
     trasferta = riga["AwayTeam"]
@@ -167,9 +179,12 @@ def precompute_componente(idx_test, half_life_giorni, n_partite_forma, elo_casa=
     if all(col in riga.index for col in colonne_quota):
         qh, qd, qa = riga[colonne_quota[0]], riga[colonne_quota[1]], riga[colonne_quota[2]]
         if pd.notna(qh) and pd.notna(qd) and pd.notna(qa):
-            prob_1_quote, prob_X_quote, prob_2_quote = 1 / qh, 1 / qd, 1 / qa
-            somma = prob_1_quote + prob_X_quote + prob_2_quote
-            prob_1_quote /= somma; prob_X_quote /= somma; prob_2_quote /= somma
+            if metodo_quote == "shin":
+                prob_1_quote, prob_X_quote, prob_2_quote = probabilita_shin([qh, qd, qa])
+            else:
+                prob_1_quote, prob_X_quote, prob_2_quote = 1 / qh, 1 / qd, 1 / qa
+                somma = prob_1_quote + prob_X_quote + prob_2_quote
+                prob_1_quote /= somma; prob_X_quote /= somma; prob_2_quote /= somma
             quote_presenti = True
 
     esito = "1" if riga["FTHG"] > riga["FTAG"] else ("X" if riga["FTHG"] == riga["FTAG"] else "2")
@@ -227,19 +242,20 @@ def valuta_componente(comp, peso_forma, peso_scontri, peso_quote, rho, peso_elo=
     return {"1": p_1, "X": p_X, "2": p_2, "pred": "1" if p_1 > p_X and p_1 > p_2 else ("X" if p_X > p_2 else "2")}
 
 def predici_partita_bt(train_df_arg, test_df_arg, idx_test, peso_forma, peso_scontri, peso_quote,
-                       half_life_giorni, rho, n_partite_forma_val=5, peso_elo=0.0):
+                       half_life_giorni, rho, n_partite_forma_val=5, peso_elo=0.0, metodo_quote="proporzionale"):
     """Comodo per una singola previsione (test automatici, uso puntuale): calcola
     componenti + valutazione in un solo passo. Il backtest sull'intero test set usa
     invece precompute_componente/valuta_componente separati, per non ripetere il
     calcolo costoso a ogni configurazione di pesi provata."""
     riga = test_df.iloc[idx_test]
     elo_c, elo_t = elo_asof_batch(elo_df, [riga["HomeTeam"], riga["AwayTeam"]], [riga["Date"], riga["Date"]])
-    comp = precompute_componente(idx_test, half_life_giorni, n_partite_forma_val, elo_casa=elo_c, elo_trasferta=elo_t)
+    comp = precompute_componente(idx_test, half_life_giorni, n_partite_forma_val, elo_casa=elo_c, elo_trasferta=elo_t,
+                                 metodo_quote=metodo_quote)
     if comp is None:
         return None
     return valuta_componente(comp, peso_forma, peso_scontri, peso_quote, rho, peso_elo)
 
-def precompute_tutte(half_life_giorni, n_partite_forma_val, mostra_progress=False):
+def precompute_tutte(half_life_giorni, n_partite_forma_val, mostra_progress=False, metodo_quote="proporzionale"):
     # Lookup Elo calcolato in batch per tutte le partite di test in una volta sola
     # (molto più veloce che una query per partita dentro il ciclo).
     elo_casa_arr = elo_asof_batch(elo_df, test_df["HomeTeam"], test_df["Date"])
@@ -249,7 +265,8 @@ def precompute_tutte(half_life_giorni, n_partite_forma_val, mostra_progress=Fals
     progress_bar = st.progress(0) if mostra_progress else None
     for i in range(len(test_df)):
         comp = precompute_componente(i, half_life_giorni, n_partite_forma_val,
-                                     elo_casa=elo_casa_arr[i], elo_trasferta=elo_trasf_arr[i])
+                                     elo_casa=elo_casa_arr[i], elo_trasferta=elo_trasf_arr[i],
+                                     metodo_quote=metodo_quote)
         if comp is not None:
             componenti.append(comp)
         if mostra_progress:
@@ -276,7 +293,7 @@ def valuta_tutte(componenti, peso_forma, peso_scontri, peso_quote, rho, peso_elo
 # ------------------------------------------------------------
 if st.sidebar.button(":material/play_arrow: Esegui backtesting", width="stretch", type="primary"):
     with st.spinner(":material/hourglass_top: Simulando le previsioni... Potrebbe richiedere qualche minuto."):
-        componenti = precompute_tutte(emivita_giorni_bt, n_partite_forma, mostra_progress=True)
+        componenti = precompute_tutte(emivita_giorni_bt, n_partite_forma, mostra_progress=True, metodo_quote=metodo_quote_bt)
         predizioni, reali, stagioni_pred, probabilita = valuta_tutte(
             componenti, peso_forma_bt, peso_scontri_bt, peso_quote_bt, rho_bt, peso_elo_bt)
 
@@ -403,7 +420,7 @@ if st.sidebar.button(":material/compare_arrows: Confronta configurazioni", width
         ("Ottimale + Elo (pesi correnti della sidebar)", peso_forma_bt, peso_scontri_bt, peso_quote_bt, peso_elo_bt),
     ]
     with st.spinner(":material/hourglass_top: Calcolo componenti una sola volta per tutte le configurazioni..."):
-        componenti = precompute_tutte(emivita_giorni_bt, n_partite_forma, mostra_progress=True)
+        componenti = precompute_tutte(emivita_giorni_bt, n_partite_forma, mostra_progress=True, metodo_quote=metodo_quote_bt)
 
     risultati_confronto = []
     for nome, pf, ps, pq, pe in configurazioni:
