@@ -139,6 +139,34 @@ def test_backtesting_usa_le_quote_reali_della_partita_di_test():
     assert pred_con_quote["1"] != pytest.approx(pred_senza_quote["1"], abs=1e-9)
 
 
+def test_backtesting_fonte_quote_chiusura_usa_le_colonne_C():
+    colonna_chiusura = "OddsAvgCH"
+    if colonna_chiusura not in bt.test_df.columns:
+        pytest.skip("Nessuna quota di chiusura nel dataset di test corrente")
+    riga_con_chiusura = bt.test_df[bt.test_df[colonna_chiusura].notna()]
+    if riga_con_chiusura.empty:
+        pytest.skip("Nessuna partita con quota di chiusura nel test set corrente")
+    idx = bt.test_df.index.get_loc(riga_con_chiusura.iloc[0].name)
+
+    comp_apertura = bt.precompute_componente(idx, 730, 3, fonte_quote="apertura")
+    comp_chiusura = bt.precompute_componente(idx, 730, 3, fonte_quote="chiusura")
+
+    assert comp_apertura is not None and comp_chiusura is not None
+    assert comp_chiusura["quote_presenti"]
+    # Apertura e chiusura sono quote diverse (il mercato si e' mosso): le probabilita'
+    # implicite devono differire, altrimenti fonte_quote non starebbe leggendo colonne diverse.
+    assert comp_chiusura["prob_1_quote"] != pytest.approx(comp_apertura["prob_1_quote"], abs=1e-9)
+
+
+def test_backtesting_fonte_quote_chiusura_non_crasha_se_mancante():
+    # Prima del 2019 le colonne OddsAvgCH/CD/CA non esistono/sono NaN in
+    # serie_a.csv: con fonte_quote="chiusura" precompute_componente deve
+    # restituire comunque una componente valida (senza quote per quella
+    # partita), non fallire.
+    comp = bt.precompute_componente(0, 730, 3, fonte_quote="chiusura")
+    assert comp is not None
+
+
 def test_backtesting_peso_quote_alto_non_schiaccia_xg():
     # Stessa regressione di test_stima_probabilita_peso_quote_alto_non_schiaccia_xg
     # ma nel motore di backtesting: le due implementazioni erano gia' divergenti in

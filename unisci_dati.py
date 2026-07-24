@@ -22,6 +22,16 @@ COLONNE_QUOTA_MEDIA = {
     "A": ["AvgA", "BbAvA", "B365A"],
 }
 
+# Quota di CHIUSURA (a ridosso del fischio d'inizio, non all'apertura del mercato):
+# presente solo dal 2019 in poi (7 stagioni su 33) su football-data.co.uk, colonne
+# AvgCH/CD/CA (media multi-bookmaker) / B365CH/CD/CA (fallback Bet365 da solo).
+# Prima del 2019 restano NaN: nessuna sostituzione possibile, il dato non esiste.
+COLONNE_QUOTA_CHIUSURA = {
+    "H": ["AvgCH", "B365CH"],
+    "D": ["AvgCD", "B365CD"],
+    "A": ["AvgCA", "B365CA"],
+}
+
 for file in sorted(os.listdir(cartella_stagioni)):
     if file.endswith(".txt"):
         percorso = os.path.join(cartella_stagioni, file)
@@ -45,8 +55,16 @@ for file in sorted(os.listdir(cartella_stagioni)):
             colonna_scelta = next((c for c in candidate if c in df.columns), None)
             df[f"OddsAvg{esito}"] = pd.to_numeric(df[colonna_scelta], errors="coerce") if colonna_scelta else pd.NA
 
+        for esito, candidate in COLONNE_QUOTA_CHIUSURA.items():
+            colonna_scelta = next((c for c in candidate if c in df.columns), None)
+            df[f"OddsAvgC{esito}"] = pd.to_numeric(df[colonna_scelta], errors="coerce") if colonna_scelta else pd.NA
+
         # Trova le colonne presenti tra quelle richieste + le quote di consenso appena create
-        colonne_presenti = [c for c in colonne_da_tenere if c in df.columns] + [f"OddsAvg{e}" for e in COLONNE_QUOTA_MEDIA]
+        colonne_presenti = (
+            [c for c in colonne_da_tenere if c in df.columns]
+            + [f"OddsAvg{e}" for e in COLONNE_QUOTA_MEDIA]
+            + [f"OddsAvgC{e}" for e in COLONNE_QUOTA_CHIUSURA]
+        )
 
         if "HomeTeam" not in colonne_presenti or "AwayTeam" not in colonne_presenti:
             print(f"  ⚠️ {file}: colonne essenziali mancanti, lo salto.")
@@ -92,5 +110,6 @@ print(f"Colonne: {df_finale.columns.tolist()}")
 print(f"Partite con quote Bet365: {df_finale['B365H'].notna().sum() if 'B365H' in df_finale.columns else 0}")
 print(f"Partite con quote Pinnacle: {df_finale['PSH'].notna().sum() if 'PSH' in df_finale.columns else 0}")
 print(f"Partite con quota media di consenso: {df_finale['OddsAvgH'].notna().sum()}")
+print(f"Partite con quota di chiusura (dal 2019): {df_finale['OddsAvgCH'].notna().sum()}")
 if "Date" in df_finale.columns:
     print(f"Partite con data valida: {df_finale['Date'].notna().sum()} / {len(df_finale)}")

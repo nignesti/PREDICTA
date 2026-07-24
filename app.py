@@ -194,16 +194,31 @@ def stima_probabilita(df, stats, squadra_casa, squadra_trasferta,
     quote_presenti = False
     prob_1_quote, prob_X_quote, prob_2_quote = 0, 0, 0
     colonne_quota = ("OddsAvgH", "OddsAvgD", "OddsAvgA") if "OddsAvgH" in df.columns else ("B365H", "B365D", "B365A")
+    colonne_chiusura = ("OddsAvgCH", "OddsAvgCD", "OddsAvgCA")
 
     if colonne_quota[0] in df.columns and scontri[0] is not None:
         _, _, _, _, _, tabella_scontri = scontri
         if colonne_quota[0] in tabella_scontri.columns:
-            quote_valide = tabella_scontri.dropna(subset=list(colonne_quota))
+            # Preferiamo la quota di CHIUSURA (a ridosso del fischio d'inizio,
+            # incorpora più informazione di mercato dell'apertura): validata su 3
+            # stagioni indipendenti in pages/backtesting.py, migliora l'accuratezza
+            # media di 0.43 punti percentuali. Disponibile solo dal 2019: dove manca
+            # (scontri diretti più vecchi) ricadiamo sulla quota di apertura per
+            # quella singola partita, non sull'intera media.
+            if all(c in tabella_scontri.columns for c in colonne_chiusura):
+                quota_h = tabella_scontri[colonne_chiusura[0]].combine_first(tabella_scontri[colonne_quota[0]])
+                quota_d = tabella_scontri[colonne_chiusura[1]].combine_first(tabella_scontri[colonne_quota[1]])
+                quota_a = tabella_scontri[colonne_chiusura[2]].combine_first(tabella_scontri[colonne_quota[2]])
+            else:
+                quota_h, quota_d, quota_a = (tabella_scontri[colonne_quota[0]], tabella_scontri[colonne_quota[1]],
+                                             tabella_scontri[colonne_quota[2]])
+
+            quote_valide = pd.DataFrame({"H": quota_h, "D": quota_d, "A": quota_a}).dropna()
             if len(quote_valide) > 0:
                 # Converti quote in probabilità implicite e fai la media
-                prob_1_quote = (1 / quote_valide[colonne_quota[0]]).mean()
-                prob_X_quote = (1 / quote_valide[colonne_quota[1]]).mean()
-                prob_2_quote = (1 / quote_valide[colonne_quota[2]]).mean()
+                prob_1_quote = (1 / quote_valide["H"]).mean()
+                prob_X_quote = (1 / quote_valide["D"]).mean()
+                prob_2_quote = (1 / quote_valide["A"]).mean()
                 # Rimuovi il margine del bookmaker con la correzione di Shin
                 # (1992/1993) invece della normalizzazione proporzionale
                 # semplice: valida su 3 stagioni indipendenti in
