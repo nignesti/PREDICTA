@@ -13,9 +13,66 @@ Contiene la parte di Dixon & Coles (1997) che avevamo in sospeso:
 """
 
 import numpy as np
+import pandas as pd
 from scipy.stats import poisson
 
 MAX_GOL = 10
+
+
+def prepara_elo(elo_df):
+    """Ordina lo storico Elo (colonne Squadra, Elo, From, To) per i lookup
+    successivi con elo_asof_batch. Da chiamare una volta sola dopo il caricamento.
+    pd.merge_asof richiede la colonna 'on' ordinata sull'intero DataFrame, non
+    solo dentro ogni gruppo "by": l'ordinamento è quindi solo su 'From'."""
+    return elo_df.sort_values("From").reset_index(drop=True)
+
+
+def elo_asof_batch(elo_df_ordinato, squadre, date):
+    """Rating Elo pre-partita per una serie di coppie (squadra, data): il periodo
+    Elo che copre 'data' riflette sempre il rating PRIMA della partita giocata
+    quel giorno (l'aggiornamento post-partita parte dal giorno successivo),
+    quindi non c'è rischio di lookahead nell'usarlo per la partita da prevedere.
+    Se una squadra/data non ha un periodo Elo noto, restituisce NaN."""
+    richieste = pd.DataFrame({"Squadra": list(squadre), "Data": pd.to_datetime(pd.Series(list(date)).values)})
+    richieste["_ordine_originale"] = np.arange(len(richieste))
+    richieste_ordinate = richieste.sort_values("Data")
+
+    risultato = pd.merge_asof(
+        richieste_ordinate, elo_df_ordinato,
+        left_on="Data", right_on="From", by="Squadra", direction="backward",
+    )
+    risultato.loc[risultato["To"] < risultato["Data"], "Elo"] = np.nan
+    risultato = risultato.sort_values("_ordine_originale")
+    return risultato["Elo"].to_numpy()
+
+
+def calibra_regressione_elo(df, elo_df, alpha=0.0001):
+    """Calibra su dati reali (non una costante indovinata) come la differenza di
+    rating Elo tra le due squadre si traduce in gol attesi: due regressioni di
+    Poisson (link esponenziale, coerente con il resto del modello) su
+    elo_casa - elo_trasferta -> gol fatti in casa / gol fatti in trasferta.
+    Va chiamata solo sul training set per evitare data leakage. Richiede
+    scikit-learn (già una dipendenza del progetto)."""
+    from sklearn.linear_model import PoissonRegressor
+
+    elo_casa = elo_asof_batch(elo_df, df["HomeTeam"], df["Date"])
+    elo_trasferta = elo_asof_batch(elo_df, df["AwayTeam"], df["Date"])
+    diff = elo_casa - elo_trasferta
+    validi = ~np.isnan(diff)
+
+    X = diff[validi].reshape(-1, 1)
+    modello_casa = PoissonRegressor(alpha=alpha, max_iter=500).fit(X, df["FTHG"].to_numpy()[validi])
+    modello_trasferta = PoissonRegressor(alpha=alpha, max_iter=500).fit(X, df["FTAG"].to_numpy()[validi])
+    return modello_casa, modello_trasferta
+
+
+def xg_da_elo_calibrato(elo_casa, elo_trasferta, modello_casa, modello_trasferta):
+    """Applica la regressione calibrata da calibra_regressione_elo. Se un rating
+    manca (NaN), usa elo_diff=0 (nessun aggiustamento, la previsione ricade
+    sull'intercetta della regressione, cioè sui gol medi impliciti nel training)."""
+    diff = 0.0 if (pd.isna(elo_casa) or pd.isna(elo_trasferta)) else (elo_casa - elo_trasferta)
+    x = np.array([[diff]])
+    return modello_casa.predict(x)[0], modello_trasferta.predict(x)[0]
 
 
 def peso_esponenziale(giorni_trascorsi, half_life_giorni):

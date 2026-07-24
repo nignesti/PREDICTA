@@ -224,3 +224,87 @@ def test_dataset_nessuna_stagione_mancante_tra_min_e_max():
     stagioni = sorted(int(s) for s in app.df["Stagione"].unique())
     attese = list(range(stagioni[0], stagioni[-1] + 1))
     assert stagioni == attese
+
+
+# ------------------------------------------------------------
+# Elo (clubelo.com): lookup point-in-time e regressione di calibrazione
+# ------------------------------------------------------------
+
+@pytest.fixture
+def storico_elo():
+    # Due periodi contigui per "A": rating basso fino al 10/01, poi alto dall'11/01
+    # (come i dati reali di ClubElo, dove il rating si aggiorna il giorno dopo la partita).
+    righe = [
+        {"Squadra": "A", "Elo": 1500.0, "From": pd.Timestamp("2024-01-01"), "To": pd.Timestamp("2024-01-10")},
+        {"Squadra": "A", "Elo": 1550.0, "From": pd.Timestamp("2024-01-11"), "To": pd.Timestamp("2024-01-20")},
+        {"Squadra": "B", "Elo": 1400.0, "From": pd.Timestamp("2024-01-01"), "To": pd.Timestamp("2024-01-20")},
+    ]
+    return modello.prepara_elo(pd.DataFrame(righe))
+
+
+def test_elo_asof_batch_usa_il_rating_pre_partita(storico_elo):
+    # Una partita giocata il 10/01 deve prendere il rating del periodo che finisce
+    # quel giorno (1500), non quello nuovo che parte l'11/01 (1550): il rating
+    # ClubElo per un giorno riflette sempre la situazione PRIMA della partita.
+    risultato = modello.elo_asof_batch(storico_elo, ["A", "A"], [pd.Timestamp("2024-01-10"), pd.Timestamp("2024-01-11")])
+    assert risultato[0] == pytest.approx(1500.0)
+    assert risultato[1] == pytest.approx(1550.0)
+
+
+def test_elo_asof_batch_squadra_sconosciuta_da_nan(storico_elo):
+    risultato = modello.elo_asof_batch(storico_elo, ["SquadraInesistente"], [pd.Timestamp("2024-01-10")])
+    assert np.isnan(risultato[0])
+
+
+def test_elo_asof_batch_data_fuori_da_ogni_periodo_da_nan(storico_elo):
+    # Richiesta precedente all'inizio dello storico Elo della squadra: nessun
+    # periodo la copre, quindi deve restituire NaN e non un valore-spazzatura.
+    risultato = modello.elo_asof_batch(storico_elo, ["A"], [pd.Timestamp("2023-01-01")])
+    assert np.isnan(risultato[0])
+
+
+def test_calibra_regressione_elo_squadra_piu_forte_segna_di_piu():
+    # Dataset sintetico dove "A" (Elo alto) segna sistematicamente piu' di "B" (Elo
+    # basso): la regressione calibrata deve imparare xG piu' alto per chi ha Elo
+    # maggiore, non un valore piatto uguale per tutti.
+    partite = []
+    for i in range(30):
+        partite.append({"HomeTeam": "A", "AwayTeam": "B", "FTHG": 3, "FTAG": 0,
+                        "Date": pd.Timestamp("2020-01-01") + pd.Timedelta(days=i)})
+        partite.append({"HomeTeam": "B", "AwayTeam": "A", "FTHG": 0, "FTAG": 3,
+                        "Date": pd.Timestamp("2020-01-01") + pd.Timedelta(days=i)})
+    df = pd.DataFrame(partite)
+
+    elo = modello.prepara_elo(pd.DataFrame([
+        {"Squadra": "A", "Elo": 1700.0, "From": pd.Timestamp("2019-01-01"), "To": pd.Timestamp("2021-01-01")},
+        {"Squadra": "B", "Elo": 1300.0, "From": pd.Timestamp("2019-01-01"), "To": pd.Timestamp("2021-01-01")},
+    ]))
+
+    modello_casa, modello_trasferta = modello.calibra_regressione_elo(df, elo)
+    xg_a_casa, xg_b_trasferta = modello.xg_da_elo_calibrato(1700.0, 1300.0, modello_casa, modello_trasferta)
+    xg_b_casa, xg_a_trasferta = modello.xg_da_elo_calibrato(1300.0, 1700.0, modello_casa, modello_trasferta)
+
+    assert xg_a_casa > xg_b_casa  # "A" (Elo alto) in casa deve avere xG maggiore di "B" (Elo basso) in casa
+    assert xg_b_trasferta < xg_a_trasferta  # "B" in trasferta contro Elo alto deve avere xG minore
+
+
+def test_xg_da_elo_calibrato_rating_mancante_usa_elo_diff_zero():
+    # Training con copertura Elo parziale (caso realistico: una squadra senza
+    # storico Elo, es. neopromossa non ancora tracciata) mescolata a partite con
+    # Elo valido, cosi' la regressione ha comunque campioni su cui calibrarsi.
+    df = pd.DataFrame([
+        {"HomeTeam": "A", "AwayTeam": "C", "FTHG": 2, "FTAG": 1, "Date": pd.Timestamp("2020-01-01")},
+        {"HomeTeam": "C", "AwayTeam": "A", "FTHG": 1, "FTAG": 2, "Date": pd.Timestamp("2020-01-08")},
+        {"HomeTeam": "A", "AwayTeam": "B", "FTHG": 1, "FTAG": 1, "Date": pd.Timestamp("2020-01-15")},
+        {"HomeTeam": "B", "AwayTeam": "A", "FTHG": 1, "FTAG": 1, "Date": pd.Timestamp("2020-01-22")},
+    ])
+    elo = modello.prepara_elo(pd.DataFrame([
+        {"Squadra": "A", "Elo": 1500.0, "From": pd.Timestamp("2019-01-01"), "To": pd.Timestamp("2021-01-01")},
+        {"Squadra": "C", "Elo": 1450.0, "From": pd.Timestamp("2019-01-01"), "To": pd.Timestamp("2021-01-01")},
+        # "B" non ha storico Elo: le partite A-B/B-A avranno elo_diff NaN e verranno escluse dal fit.
+    ]))
+    modello_casa, modello_trasferta = modello.calibra_regressione_elo(df, elo)
+    # elo_trasferta NaN (squadra "B" non nello storico Elo): non deve esplodere,
+    # deve ricadere su elo_diff=0.
+    xg_casa, xg_trasferta = modello.xg_da_elo_calibrato(1500.0, np.nan, modello_casa, modello_trasferta)
+    assert np.isfinite(xg_casa) and np.isfinite(xg_trasferta)

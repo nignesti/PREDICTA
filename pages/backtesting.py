@@ -5,7 +5,8 @@ import plotly.graph_objects as go
 import plotly.express as px
 from sklearn.metrics import accuracy_score, confusion_matrix, precision_recall_fscore_support, log_loss
 
-from modello import stats_pesate_squadre, distribuzione_punteggi, esiti_da_matrice, rps
+from modello import (stats_pesate_squadre, distribuzione_punteggi, esiti_da_matrice, rps,
+                     prepara_elo, elo_asof_batch, calibra_regressione_elo, xg_da_elo_calibrato)
 
 st.set_page_config(page_title="Backtesting", page_icon="📊", layout="wide")
 
@@ -70,7 +71,13 @@ def load_data():
     df = df.dropna(subset=["FTHG", "FTAG"])
     return df
 
+@st.cache_data
+def load_elo():
+    elo = pd.read_csv("elo_storico.csv", parse_dates=["From", "To"])
+    return prepara_elo(elo)
+
 df = load_data()
+elo_df = load_elo()
 
 # ------------------------------------------------------------
 # SIDEBAR
@@ -90,6 +97,8 @@ peso_scontri_bt = st.sidebar.slider("Peso scontri", 0.0, 0.5, 0.0, 0.05,
                     help="Su 3 stagioni di backtest non aggiunge valore misurabile una volta pesate bene le quote.")
 n_partite_forma = st.sidebar.slider("Partite per forma", 3, 10, 3,
                     help="Poco sensibile in questo range; 3 e' risultato leggermente migliore nella grid search.")
+peso_elo_bt = st.sidebar.slider("Peso Elo (ClubElo.com)", 0.0, 1.0, 0.0, 0.05,
+                    help="Rating Elo storico da clubelo.com, non ancora validato: default a 0 finché non testato.")
 peso_quote_bt = st.sidebar.slider("Peso quote", 0.0, 1.0, 0.90, 0.05)
 
 st.sidebar.markdown("---")
@@ -102,7 +111,6 @@ rho_bt = st.sidebar.slider(
     "Rho Dixon-Coles (correzione bassi punteggi)", -0.30, 0.10, -0.10, 0.02,
     help="Corregge la sottostima dei pareggi tipica di un Poisson indipendente. Valori tipici in letteratura: -0.05/-0.20."
 )
-
 train_df = df[~df["Stagione"].astype(str).isin(stagioni_test)].copy()
 test_df = df[df["Stagione"].astype(str).isin(stagioni_test)].copy()
 
@@ -116,6 +124,12 @@ media_gol_casa = train_df["FTHG"].mean()
 media_gol_trasferta = train_df["FTAG"].mean()
 media_gol_generale = (media_gol_casa + media_gol_trasferta) / 2
 vantaggio_casa = media_gol_casa / media_gol_trasferta
+
+# Regressione di Poisson che calibra su dati reali di training come la differenza
+# di rating Elo si traduce in gol attesi (al posto di una costante indovinata):
+# va rifatta solo quando cambia il training set (stagioni di test), non a ogni
+# combinazione di pesi provata.
+modello_elo_casa, modello_elo_trasferta = calibra_regressione_elo(train_df, elo_df)
 
 # ------------------------------------------------------------
 # FUNZIONI
@@ -150,11 +164,12 @@ def scontri_diretti_bt(df_prima, squadra1, squadra2, ultimi_n=10):
             gol_fatti_s1.append(row["FTAG"]); gol_subiti_s1.append(row["FTHG"])
     return np.mean(gol_fatti_s1), np.mean(gol_subiti_s1)
 
-def precompute_componente(idx_test, half_life_giorni, n_partite_forma):
+def precompute_componente(idx_test, half_life_giorni, n_partite_forma, elo_casa=None, elo_trasferta=None):
     """Calcola le componenti costose (storico pesato nel tempo, forma, scontri
     diretti, quote) per una partita di test. Dipendono solo da half_life_giorni e
     n_partite_forma, MAI dai pesi forma/scontri/quote: si possono quindi calcolare
-    una volta sola e riusare per confrontare più configurazioni di pesi."""
+    una volta sola e riusare per confrontare più configurazioni di pesi. I rating
+    Elo (se passati) sono già stati calcolati in batch da precompute_tutte."""
     riga = test_df.iloc[idx_test]
     casa = riga["HomeTeam"]
     trasferta = riga["AwayTeam"]
@@ -204,31 +219,37 @@ def precompute_componente(idx_test, half_life_giorni, n_partite_forma):
                 xG_casa_scontri=xG_casa_scontri, xG_trasf_scontri=xG_trasf_scontri,
                 scontri_validi=scontri_validi, quote_presenti=quote_presenti,
                 prob_1_quote=prob_1_quote, prob_X_quote=prob_X_quote, prob_2_quote=prob_2_quote,
+                elo_casa=elo_casa, elo_trasferta=elo_trasferta,
                 esito=esito, stagione=str(riga["Stagione"]))
 
-def valuta_componente(comp, peso_forma, peso_scontri, peso_quote, rho):
+def valuta_componente(comp, peso_forma, peso_scontri, peso_quote, rho, peso_elo=0.0):
     """Combina le componenti precalcolate con i pesi scelti: veloce (nessun accesso
     al DataFrame), si può richiamare molte volte sulle stesse componenti."""
     peso_scontri_eff = peso_scontri if comp["scontri_validi"] else 0
-    peso_totale = peso_forma + peso_scontri_eff + peso_quote
+    elo_valido = comp.get("elo_casa") is not None and pd.notna(comp.get("elo_casa")) and pd.notna(comp.get("elo_trasferta"))
+    peso_elo_eff = peso_elo if elo_valido else 0
+    peso_totale = peso_forma + peso_scontri_eff + peso_elo_eff + peso_quote
     if peso_totale > 1:
-        pf, ps, pq = peso_forma / peso_totale, peso_scontri_eff / peso_totale, peso_quote / peso_totale
+        pf, ps, pe, pq = peso_forma / peso_totale, peso_scontri_eff / peso_totale, peso_elo_eff / peso_totale, peso_quote / peso_totale
         peso_storico = 0
     else:
-        pf, ps, pq = peso_forma, peso_scontri_eff, peso_quote
-        peso_storico = 1 - pf - ps - pq
+        pf, ps, pe, pq = peso_forma, peso_scontri_eff, peso_elo_eff, peso_quote
+        peso_storico = 1 - pf - ps - pe - pq
 
     if not comp["quote_presenti"]:
         peso_storico += pq
         pq = 0
 
-    # Storico+forma+scontri vanno rinormalizzati a sommare 1 tra loro: "quote" non
+    # Storico+forma+scontri+elo vanno rinormalizzati a sommare 1 tra loro: "quote" non
     # entra nell'xG (entra dopo, sulle probabilità finali), altrimenti con peso_quote
     # alto l'xG si schiaccia verso 0 invece di usare per intero il peso rimanente.
-    peso_xg_totale = peso_storico + pf + ps
+    peso_xg_totale = peso_storico + pf + ps + pe
     if peso_xg_totale > 0:
-        xG_casa = (peso_storico * comp["xG_casa_storico"] + pf * comp["xG_casa_forma"] + ps * comp["xG_casa_scontri"]) / peso_xg_totale
-        xG_trasferta = (peso_storico * comp["xG_trasf_storico"] + pf * comp["xG_trasf_forma"] + ps * comp["xG_trasf_scontri"]) / peso_xg_totale
+        xG_casa_elo, xG_trasf_elo = xg_da_elo_calibrato(
+            comp.get("elo_casa"), comp.get("elo_trasferta"), modello_elo_casa, modello_elo_trasferta
+        ) if pe > 0 else (comp["xG_casa_storico"], comp["xG_trasf_storico"])
+        xG_casa = (peso_storico * comp["xG_casa_storico"] + pf * comp["xG_casa_forma"] + ps * comp["xG_casa_scontri"] + pe * xG_casa_elo) / peso_xg_totale
+        xG_trasferta = (peso_storico * comp["xG_trasf_storico"] + pf * comp["xG_trasf_forma"] + ps * comp["xG_trasf_scontri"] + pe * xG_trasf_elo) / peso_xg_totale
     else:
         xG_casa, xG_trasferta = comp["xG_casa_storico"], comp["xG_trasf_storico"]
 
@@ -246,21 +267,29 @@ def valuta_componente(comp, peso_forma, peso_scontri, peso_quote, rho):
     return {"1": p_1, "X": p_X, "2": p_2, "pred": "1" if p_1 > p_X and p_1 > p_2 else ("X" if p_X > p_2 else "2")}
 
 def predici_partita_bt(train_df_arg, test_df_arg, idx_test, peso_forma, peso_scontri, peso_quote,
-                       half_life_giorni, rho, n_partite_forma_val=5):
+                       half_life_giorni, rho, n_partite_forma_val=5, peso_elo=0.0):
     """Comodo per una singola previsione (test automatici, uso puntuale): calcola
     componenti + valutazione in un solo passo. Il backtest sull'intero test set usa
     invece precompute_componente/valuta_componente separati, per non ripetere il
     calcolo costoso a ogni configurazione di pesi provata."""
-    comp = precompute_componente(idx_test, half_life_giorni, n_partite_forma_val)
+    riga = test_df.iloc[idx_test]
+    elo_c, elo_t = elo_asof_batch(elo_df, [riga["HomeTeam"], riga["AwayTeam"]], [riga["Date"], riga["Date"]])
+    comp = precompute_componente(idx_test, half_life_giorni, n_partite_forma_val, elo_casa=elo_c, elo_trasferta=elo_t)
     if comp is None:
         return None
-    return valuta_componente(comp, peso_forma, peso_scontri, peso_quote, rho)
+    return valuta_componente(comp, peso_forma, peso_scontri, peso_quote, rho, peso_elo)
 
 def precompute_tutte(half_life_giorni, n_partite_forma_val, mostra_progress=False):
+    # Lookup Elo calcolato in batch per tutte le partite di test in una volta sola
+    # (molto più veloce che una query per partita dentro il ciclo).
+    elo_casa_arr = elo_asof_batch(elo_df, test_df["HomeTeam"], test_df["Date"])
+    elo_trasf_arr = elo_asof_batch(elo_df, test_df["AwayTeam"], test_df["Date"])
+
     componenti = []
     progress_bar = st.progress(0) if mostra_progress else None
     for i in range(len(test_df)):
-        comp = precompute_componente(i, half_life_giorni, n_partite_forma_val)
+        comp = precompute_componente(i, half_life_giorni, n_partite_forma_val,
+                                     elo_casa=elo_casa_arr[i], elo_trasferta=elo_trasf_arr[i])
         if comp is not None:
             componenti.append(comp)
         if mostra_progress:
@@ -269,10 +298,10 @@ def precompute_tutte(half_life_giorni, n_partite_forma_val, mostra_progress=Fals
         progress_bar.empty()
     return componenti
 
-def valuta_tutte(componenti, peso_forma, peso_scontri, peso_quote, rho):
+def valuta_tutte(componenti, peso_forma, peso_scontri, peso_quote, rho, peso_elo=0.0):
     predizioni, reali, stagioni_pred, probabilita = [], [], [], []
     for comp in componenti:
-        r = valuta_componente(comp, peso_forma, peso_scontri, peso_quote, rho)
+        r = valuta_componente(comp, peso_forma, peso_scontri, peso_quote, rho, peso_elo)
         predizioni.append(r["pred"])
         reali.append(comp["esito"])
         stagioni_pred.append(comp["stagione"])
@@ -289,7 +318,7 @@ if st.sidebar.button("🚀 Esegui Backtesting", width='stretch', type="primary")
     with st.spinner("Simulando le previsioni... Questo potrebbe richiedere qualche minuto."):
         componenti = precompute_tutte(emivita_giorni_bt, n_partite_forma, mostra_progress=True)
         predizioni, reali, stagioni_pred, probabilita = valuta_tutte(
-            componenti, peso_forma_bt, peso_scontri_bt, peso_quote_bt, rho_bt)
+            componenti, peso_forma_bt, peso_scontri_bt, peso_quote_bt, rho_bt, peso_elo_bt)
 
         # Metriche
         acc = accuracy_score(reali, predizioni)
@@ -375,19 +404,21 @@ if st.sidebar.button("🚀 Esegui Backtesting", width='stretch', type="primary")
 st.sidebar.markdown("---")
 if st.sidebar.button("🔬 Confronta configurazioni", width='stretch'):
     configurazioni = [
-        ("Solo storico", 0.0, 0.0, 0.0),
-        ("Storico + Forma", 0.5, 0.0, 0.0),
-        ("Primo default (storico+forma+scontri+quote)", 0.5, 0.15, 0.15),
-        ("Solo quote bookmaker", 0.0, 0.0, 1.0),
-        ("Secondo default (forma=0,scontri=0.15,quote=0.85)", 0.0, 0.15, 0.85),
-        ("Ottimale validato su 3 stagioni (nuovo default)", 0.10, 0.0, 0.90),
+        ("Solo storico", 0.0, 0.0, 0.0, 0.0),
+        ("Storico + Forma", 0.5, 0.0, 0.0, 0.0),
+        ("Primo default (storico+forma+scontri+quote)", 0.5, 0.15, 0.15, 0.0),
+        ("Solo quote bookmaker", 0.0, 0.0, 1.0, 0.0),
+        ("Secondo default (forma=0,scontri=0.15,quote=0.85)", 0.0, 0.15, 0.85, 0.0),
+        ("Ottimale validato su 3 stagioni (senza Elo)", 0.10, 0.0, 0.90, 0.0),
+        ("Solo Elo (ClubElo.com)", 0.0, 0.0, 0.0, 1.0),
+        ("Ottimale + Elo (pesi correnti della sidebar)", peso_forma_bt, peso_scontri_bt, peso_quote_bt, peso_elo_bt),
     ]
-    with st.spinner("Calcolo le componenti (storico, forma, scontri, quote) una sola volta..."):
+    with st.spinner("Calcolo le componenti (storico, forma, scontri, quote, Elo) una sola volta..."):
         componenti = precompute_tutte(emivita_giorni_bt, n_partite_forma, mostra_progress=True)
 
     risultati_confronto = []
-    for nome, pf, ps, pq in configurazioni:
-        predizioni_c, reali_c, _, probabilita_c = valuta_tutte(componenti, pf, ps, pq, rho_bt)
+    for nome, pf, ps, pq, pe in configurazioni:
+        predizioni_c, reali_c, _, probabilita_c = valuta_tutte(componenti, pf, ps, pq, rho_bt, pe)
         rps_c = np.mean([rps({"1": p[0], "X": p[2], "2": p[1]}, r) for p, r in zip(probabilita_c, reali_c)])
         risultati_confronto.append({
             "Configurazione": nome,
@@ -401,7 +432,7 @@ if st.sidebar.button("🔬 Confronta configurazioni", width='stretch'):
     fig_confronto = go.Figure(go.Bar(
         x=df_confronto["Configurazione"], y=df_confronto["Accuratezza"],
         text=[f"{a:.1%}" for a in df_confronto["Accuratezza"]], textposition="outside",
-        marker_color=["#3498db", "#2ecc71", "#9b59b6", "#e67e22", "#95a5a6", "#1abc9c"]
+        marker_color=["#3498db", "#2ecc71", "#9b59b6", "#e67e22", "#95a5a6", "#1abc9c", "#e74c3c", "#f1c40f"]
     ))
     fig_confronto.update_layout(height=400, yaxis_tickformat=".0%", yaxis_title="Accuratezza 1X2", yaxis_range=[0, 1])
     st.plotly_chart(fig_confronto, width='stretch')

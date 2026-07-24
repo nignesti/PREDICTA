@@ -5,3 +5,6 @@ __pycache__/
 .DS_Store
 .agents/
 .claude/
+
+# Rigenerabile con "python scarica_elo.py" (7.9MB, causava fallimenti di push su HTTPS)
+elo_storico.csv
