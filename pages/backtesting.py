@@ -28,11 +28,20 @@ def load_data():
 
 @st.cache_data
 def load_elo():
-    elo = pd.read_csv("elo_storico.csv", parse_dates=["From", "To"])
-    return prepara_elo(elo)
+    # elo_storico.csv e' gitignored (7.9MB, causava fallimenti di push su HTTPS:
+    # vedi ROADMAP.md), quindi non e' detto sia presente nell'ambiente di deploy.
+    # Elo e' comunque una componente facoltativa (validata negativa, peso di
+    # default 0): se il file manca la pagina deve funzionare lo stesso, solo
+    # senza la possibilita' di provare pesi Elo diversi da 0.
+    try:
+        elo = pd.read_csv("elo_storico.csv", parse_dates=["From", "To"])
+        return prepara_elo(elo)
+    except FileNotFoundError:
+        return None
 
 df = load_data()
 elo_df = load_elo()
+ELO_DISPONIBILE = elo_df is not None
 
 # ------------------------------------------------------------
 # SIDEBAR
@@ -57,8 +66,13 @@ with st.sidebar.container(border=True):
                         help="Su 3 stagioni di backtest non aggiunge valore misurabile una volta pesate bene le quote.")
     n_partite_forma = st.slider("Partite per forma", 3, 10, 3,
                         help="Poco sensibile in questo range; 3 e' risultato leggermente migliore nella grid search.")
-    peso_elo_bt = st.slider("Elo (ClubElo.com)", 0.0, 1.0, 0.0, 0.05,
-                        help="Rating Elo storico da clubelo.com, non ancora validato: default a 0 finché non testato.")
+    if ELO_DISPONIBILE:
+        peso_elo_bt = st.slider("Elo (ClubElo.com)", 0.0, 1.0, 0.0, 0.05,
+                            help="Validato su 3 stagioni indipendenti: nessuna combinazione batte la configurazione "
+                                 "senza Elo (54.87% senza vs 54.79% nella miglior combinazione con Elo). Default a 0.")
+    else:
+        peso_elo_bt = 0.0
+        st.caption(":material/info: Elo non disponibile in questo ambiente (`elo_storico.csv` non presente).")
     peso_quote_bt = st.slider("Quote bookmaker", 0.0, 1.0, 0.90, 0.05)
     metodo_quote_bt = st.selectbox(
         "Metodo conversione quote", ["Shin (1992/1993)", "Proporzionale (1/quota)"],
@@ -99,7 +113,7 @@ vantaggio_casa = media_gol_casa / media_gol_trasferta
 # di rating Elo si traduce in gol attesi (al posto di una costante indovinata):
 # va rifatta solo quando cambia il training set (stagioni di test), non a ogni
 # combinazione di pesi provata.
-modello_elo_casa, modello_elo_trasferta = calibra_regressione_elo(train_df, elo_df)
+modello_elo_casa, modello_elo_trasferta = calibra_regressione_elo(train_df, elo_df) if ELO_DISPONIBILE else (None, None)
 
 # ------------------------------------------------------------
 # FUNZIONI
@@ -248,7 +262,10 @@ def predici_partita_bt(train_df_arg, test_df_arg, idx_test, peso_forma, peso_sco
     invece precompute_componente/valuta_componente separati, per non ripetere il
     calcolo costoso a ogni configurazione di pesi provata."""
     riga = test_df.iloc[idx_test]
-    elo_c, elo_t = elo_asof_batch(elo_df, [riga["HomeTeam"], riga["AwayTeam"]], [riga["Date"], riga["Date"]])
+    if ELO_DISPONIBILE:
+        elo_c, elo_t = elo_asof_batch(elo_df, [riga["HomeTeam"], riga["AwayTeam"]], [riga["Date"], riga["Date"]])
+    else:
+        elo_c, elo_t = np.nan, np.nan
     comp = precompute_componente(idx_test, half_life_giorni, n_partite_forma_val, elo_casa=elo_c, elo_trasferta=elo_t,
                                  metodo_quote=metodo_quote)
     if comp is None:
@@ -258,8 +275,12 @@ def predici_partita_bt(train_df_arg, test_df_arg, idx_test, peso_forma, peso_sco
 def precompute_tutte(half_life_giorni, n_partite_forma_val, mostra_progress=False, metodo_quote="proporzionale"):
     # Lookup Elo calcolato in batch per tutte le partite di test in una volta sola
     # (molto più veloce che una query per partita dentro il ciclo).
-    elo_casa_arr = elo_asof_batch(elo_df, test_df["HomeTeam"], test_df["Date"])
-    elo_trasf_arr = elo_asof_batch(elo_df, test_df["AwayTeam"], test_df["Date"])
+    if ELO_DISPONIBILE:
+        elo_casa_arr = elo_asof_batch(elo_df, test_df["HomeTeam"], test_df["Date"])
+        elo_trasf_arr = elo_asof_batch(elo_df, test_df["AwayTeam"], test_df["Date"])
+    else:
+        elo_casa_arr = np.full(len(test_df), np.nan)
+        elo_trasf_arr = np.full(len(test_df), np.nan)
 
     componenti = []
     progress_bar = st.progress(0) if mostra_progress else None
@@ -416,9 +437,12 @@ if st.sidebar.button(":material/compare_arrows: Confronta configurazioni", width
         ("Solo quote bookmaker", 0.0, 0.0, 1.0, 0.0),
         ("Secondo default (forma=0,scontri=0.15,quote=0.85)", 0.0, 0.15, 0.85, 0.0),
         ("Ottimale validato su 3 stagioni (senza Elo)", 0.10, 0.0, 0.90, 0.0),
-        ("Solo Elo (ClubElo.com)", 0.0, 0.0, 0.0, 1.0),
-        ("Ottimale + Elo (pesi correnti della sidebar)", peso_forma_bt, peso_scontri_bt, peso_quote_bt, peso_elo_bt),
     ]
+    if ELO_DISPONIBILE:
+        configurazioni += [
+            ("Solo Elo (ClubElo.com)", 0.0, 0.0, 0.0, 1.0),
+            ("Ottimale + Elo (pesi correnti della sidebar)", peso_forma_bt, peso_scontri_bt, peso_quote_bt, peso_elo_bt),
+        ]
     with st.spinner(":material/hourglass_top: Calcolo componenti una sola volta per tutte le configurazioni..."):
         componenti = precompute_tutte(emivita_giorni_bt, n_partite_forma, mostra_progress=True, metodo_quote=metodo_quote_bt)
 
