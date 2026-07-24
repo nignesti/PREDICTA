@@ -171,6 +171,37 @@ def test_tau_dixon_coles_rho_negativo_aumenta_probabilita_pareggio():
     assert esiti_corretti["p_X"] > esiti_neutri["p_X"]
 
 
+def test_probabilita_shin_senza_overround_coincide_col_proporzionale():
+    # Quote "eque" (nessun margine, somma di 1/quota == 1): Shin e proporzionale
+    # devono coincidere, non c'e' margine da ripartire in modo diverso.
+    quote = [2.0, 4.0, 4.0]  # 1/2 + 1/4 + 1/4 = 1.0
+    proporzionale = [1 / q / sum(1 / q for q in quote) for q in quote]
+    shin = modello.probabilita_shin(quote)
+    assert shin == pytest.approx(proporzionale, abs=1e-6)
+
+
+def test_probabilita_shin_somma_a_uno_con_overround():
+    quote = [1.8, 3.6, 4.5]  # overround tipico da quote reali di calcio
+    shin = modello.probabilita_shin(quote)
+    assert sum(shin) == pytest.approx(1.0, abs=1e-9)
+    assert all(p > 0 for p in shin)
+
+
+def test_probabilita_shin_mantiene_ordine_di_favorito_e_differisce_dal_proporzionale():
+    quote = [1.8, 3.6, 4.5]
+    pi = [1 / q for q in quote]
+    proporzionale = [p / sum(pi) for p in pi]
+    shin = modello.probabilita_shin(quote)
+
+    # L'ordine (favorito > pareggio > sfavorito, dato l'ordine delle quote) va
+    # preservato: Shin corregge QUANTO margine togliere da ciascun esito, non
+    # l'ordinamento delle probabilita'.
+    assert shin[0] > shin[1] > shin[2]
+    # Con overround, la correzione di Shin non e' una normalizzazione uniforme:
+    # deve produrre probabilita' diverse dal metodo proporzionale.
+    assert shin != pytest.approx(proporzionale, abs=1e-6)
+
+
 def test_distribuzione_punteggi_somma_a_uno():
     for xg_casa, xg_trasf, rho in [(0.8, 0.8, -0.1), (2.5, 0.3, -0.2), (1.2, 1.2, 0.0)]:
         matrice = modello.distribuzione_punteggi(xg_casa, xg_trasf, rho=rho)

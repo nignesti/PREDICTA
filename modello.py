@@ -131,6 +131,40 @@ def stats_pesate_squadre(df, data_riferimento, half_life_giorni):
     return stats.reset_index()
 
 
+def probabilita_shin(quote):
+    """Converte quote decimali in probabilita' vere con il modello di Shin (1992,
+    1993), alternativa alla normalizzazione proporzionale semplice (1/quota poi
+    rinormalizzata) usata finora. Il metodo proporzionale rimuove il margine del
+    bookmaker in modo uniforme tra gli esiti; Shin stima invece la quota z di
+    "insider trading" scontata dal bookmaker e la usa per ripartire il margine
+    in modo non uniforme (più margine sulle quote alte, coerente con la
+    favorite-longshot bias). Formula chiusa (Strumbelj 2014):
+        p_i = (sqrt(z^2 + 4(1-z) * pi_i^2 / Sigma) - z) / (2(1-z))
+    dove pi_i = 1/quota_i e Sigma = somma(pi_i); z si trova per bisezione in
+    [0, 1) imponendo che le p_i sommino a 1. Restituisce una lista di
+    probabilita' nello stesso ordine di 'quote'."""
+    from scipy.optimize import brentq
+
+    pi = np.array([1.0 / q for q in quote], dtype=float)
+    sigma = pi.sum()
+
+    def probabilita_per_z(z):
+        radice = np.sqrt(z ** 2 + 4 * (1 - z) * pi ** 2 / sigma)
+        return (radice - z) / (2 * (1 - z))
+
+    def scarto(z):
+        return probabilita_per_z(z).sum() - 1.0
+
+    if scarto(0.0) <= 0:
+        # Nessun margine da correggere (quote gia' senza overround): la
+        # normalizzazione proporzionale e Shin coincidono in questo caso.
+        return (pi / sigma).tolist()
+
+    z = brentq(scarto, 0.0, 1 - 1e-9, xtol=1e-12)
+    p = probabilita_per_z(z)
+    return (p / p.sum()).tolist()
+
+
 def tau_dixon_coles(x, y, lam, mu, rho):
     """Fattore di correzione di Dixon & Coles (1997) per i 4 risultati a basso
     punteggio, dove il Poisson indipendente sottostima sistematicamente i pareggi."""
