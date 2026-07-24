@@ -1,0 +1,89 @@
+[theme]
+base = "dark"
+
+# Football analytics palette — deep navy + emerald accents
+primaryColor = "#00E676"
+backgroundColor = "#0D1117"
+secondaryBackgroundColor = "#161B22"
+textColor = "#E6EDF3"
+
+# Refined colors
+linkColor = "#00E676"
+codeTextColor = "#E6EDF3"
+codeBackgroundColor = "#1C2128"
+borderColor = "#30363D"
+
+# Semantic palette
+greenColor = "#00E676"
+greenBackgroundColor = "#0A2E1A"
+greenTextColor = "#00E676"
+redColor = "#FF1744"
+redBackgroundColor = "#2E0A14"
+redTextColor = "#FF1744"
+orangeColor = "#FF9100"
+yellowColor = "#FFD600"
+blueColor = "#448AFF"
+violetColor = "#B388FF"
+grayColor = "#8B949E"
+
+# Chart colors — vibrant, football-inspired
+chartCategoricalColors = [
+    "#00E676", "#448AFF", "#FF1744", "#FF9100",
+    "#B388FF", "#FFD600", "#00BCD4", "#E040FB"
+]
+chartSequentialColors = [
+    "#0A2E1A", "#0D3B22", "#10482A", "#135532",
+    "#16623A", "#1A7F4A", "#1E9C5A", "#22B96A",
+    "#40D680", "#60F396"
+]
+
+# Dataframe styling
+dataframeBorderColor = "#30363D"
+dataframeHeaderBackgroundColor = "#161B22"
+
+# Typography with Inter (clean, modern)
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+headingFont = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@600;700;800&display=swap"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+
+# Font sizing
+baseFontSize = 15
+baseFontWeight = 400
+codeFontSize = "0.85rem"
+codeFontWeight = 500
+
+headingFontSizes = ["36px", "28px", "22px", "18px", "15px", "13px"]
+headingFontWeights = [700, 700, 600, 600, 500, 500]
+
+# Link styling
+linkUnderline = false
+
+# Border radius — subtle rounding
+baseRadius = "12px"
+buttonRadius = "10px"
+showWidgetBorder = true
+showSidebarBorder = true
+
+# Sidebar customization
+[theme.sidebar]
+backgroundColor = "#0D1117"
+secondaryBackgroundColor = "#161B22"
+codeBackgroundColor = "#1C2128"
+textColor = "#E6EDF3"
+borderColor = "#30363D"
+primaryColor = "#00E676"
+
+# Light mode overrides
+[theme.light]
+primaryColor = "#1B5E20"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F7FA"
+textColor = "#1F2328"
+borderColor = "#D0D7DE"
+
+[theme.light.sidebar]
+backgroundColor = "#F5F7FA"
+secondaryBackgroundColor = "#EAEEF2"
+textColor = "#1F2328"
+borderColor = "#D0D7DE"
+primaryColor = "#1B5E20"

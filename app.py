@@ -17,23 +17,11 @@ RHO_DIXON_COLES = -0.10
 # CONFIGURAZIONE PAGINA
 # ------------------------------------------------------------
 st.set_page_config(
-    page_title="Pronostici Serie A",
-    page_icon="⚽",
+    page_title="PredictA — Pronostici Serie A",
+    page_icon=":material/sports_soccer:",
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-st.markdown("""
-<style>
-    .main-header { font-size: 2.5rem; font-weight: 700; text-align: center; margin-bottom: 2rem; }
-    .probability-card { border-radius: 15px; padding: 1.5rem; color: white; text-align: center; margin: 0.5rem; }
-    .probability-card.home { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); }
-    .probability-card.draw { background: linear-gradient(135deg, #8e9eab 0%, #eef2f3 100%); color: #333; }
-    .probability-card.away { background: linear-gradient(135deg, #c31432 0%, #240b36 100%); }
-    .big-number { font-size: 2rem; font-weight: 800; }
-    .section-title { font-size: 1.3rem; font-weight: 600; margin-top: 1.5rem; margin-bottom: 0.8rem; border-bottom: 2px solid #e0e0e0; padding-bottom: 0.3rem; }
-</style>
-""", unsafe_allow_html=True)
 
 # ------------------------------------------------------------
 # DATI
@@ -58,43 +46,43 @@ vantaggio_casa = media_gol_casa / media_gol_trasferta
 # SIDEBAR
 # ------------------------------------------------------------
 with st.sidebar:
-    st.image("serie_a_logo.svg", width=120)
-    st.markdown("### ⚙️ Impostazioni Modello")
+    st.logo("serie_a_logo.svg", size="large")
+    st.markdown("### :material/tune: Impostazioni modello")
 
-    st.markdown("---")
-    st.markdown("#### 🏟️ Statistiche Campionato")
-    col_s1, col_s2, col_s3 = st.columns(3)
-    col_s1.metric("Gol Casa", f"{media_gol_casa:.2f}")
-    col_s2.metric("Gol Trasferta", f"{media_gol_trasferta:.2f}")
-    col_s3.metric("Vantaggio", f"+{((vantaggio_casa-1)*100):.0f}%")
+    with st.container(border=True):
+        st.markdown("**Statistiche campionato**")
+        col_s1, col_s2, col_s3 = st.columns(3)
+        col_s1.metric("Gol casa", f"{media_gol_casa:.2f}")
+        col_s2.metric("Gol trasferta", f"{media_gol_trasferta:.2f}")
+        col_s3.metric("Vantaggio casa", f"+{((vantaggio_casa-1)*100):.0f}%")
 
-    st.markdown("---")
-    st.markdown("#### 🎚️ Pesi del Modello")
-    peso_forma = st.slider("Forma recente", 0.0, 1.0, 0.10, 0.05,
-                       help="Validato su 3 stagioni indipendenti: un peso piccolo aiuta, oltre 0.20-0.25 peggiora e diventa rumore.")
-    peso_scontri = st.slider("Scontri diretti", 0.0, 0.5, 0.0, 0.05,
-                       help="Su 3 stagioni di backtest non aggiunge valore misurabile una volta pesate bene le quote: default a 0.")
-    peso_quote = st.slider("Quote bookmaker", 0.0, 1.0, 0.90, 0.05,
-                       help="Peso delle quote storiche Bet365/Pinnacle. Pesi di default validati su 3 stagioni indipendenti di backtest.")
-    peso_storico = 1 - peso_forma - peso_scontri - peso_quote
+    with st.container(border=True):
+        st.markdown("**Pesi del modello**")
+        peso_forma = st.slider("Forma recente", 0.0, 1.0, 0.10, 0.05,
+                           help="Validato su 3 stagioni indipendenti: un peso piccolo aiuta, oltre 0.20-0.25 peggiora e diventa rumore.")
+        peso_scontri = st.slider("Scontri diretti", 0.0, 0.5, 0.0, 0.05,
+                           help="Su 3 stagioni di backtest non aggiunge valore misurabile una volta pesate bene le quote: default a 0.")
+        peso_quote = st.slider("Quote bookmaker", 0.0, 1.0, 0.90, 0.05,
+                           help="Peso delle quote storiche Bet365/Pinnacle. Pesi di default validati su 3 stagioni indipendenti di backtest.")
+        peso_storico = 1 - peso_forma - peso_scontri - peso_quote
 
-    if peso_storico < 0:
-        st.error("⚠️ Somma pesi > 100%")
-    else:
-        st.caption(f"Peso storico: **{peso_storico:.0%}**")
-        fig_pesi = go.Figure(go.Bar(
-            x=[peso_storico, peso_forma, peso_scontri],
-            y=["Pesi"], orientation='h',
-            marker_color=['#3498db', '#2ecc71', '#e74c3c'],
-            text=[f"Storico {peso_storico:.0%}", f"Forma {peso_forma:.0%}", f"Scontri {peso_scontri:.0%}"],
-            textposition='inside', insidetextanchor='middle', textfont=dict(size=10)
-        ))
-        fig_pesi.update_layout(height=80, margin=dict(l=0, r=0, t=0, b=0), barmode='stack', showlegend=False,
-                               xaxis=dict(range=[0, 1], showticklabels=False), yaxis=dict(showticklabels=False))
-        st.plotly_chart(fig_pesi, width='stretch')
+        if peso_storico < 0:
+            st.error(":material/error: La somma dei pesi supera il 100%")
+        else:
+            st.caption(f"Peso storico: **{peso_storico:.0%}**")
+            fig_pesi = go.Figure(go.Bar(
+                x=[peso_storico, peso_forma, peso_scontri],
+                y=["Pesi"], orientation='h',
+                marker_color=['#448AFF', '#00E676', '#FF1744'],
+                text=[f"Storico {peso_storico:.0%}", f"Forma {peso_forma:.0%}", f"Scontri {peso_scontri:.0%}"],
+                textposition='inside', insidetextanchor='middle', textfont=dict(size=10, color='white')
+            ))
+            fig_pesi.update_layout(height=80, margin=dict(l=0, r=0, t=0, b=0), barmode='stack', showlegend=False,
+                                   xaxis=dict(range=[0, 1], showticklabels=False), yaxis=dict(showticklabels=False),
+                                   paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+            st.plotly_chart(fig_pesi, width='stretch')
 
-    st.markdown("---")
-    st.caption(f"Partite: **{len(df):,}** | Squadre: **{df['HomeTeam'].nunique()}**")
+    st.caption(f":material/bar_chart: Partite: **{len(df):,}** | Squadre: **{df['HomeTeam'].nunique()}**")
 
 # ------------------------------------------------------------
 # FUNZIONI DI CALCOLO (condivise)
@@ -303,91 +291,138 @@ def stima_probabilita(df, stats, squadra_casa, squadra_trasferta,
 # ------------------------------------------------------------
 # INTERFACCIA PRINCIPALE
 # ------------------------------------------------------------
-st.markdown('<p class="main-header">🔮 Pronostici Serie A</p>', unsafe_allow_html=True)
-st.markdown("---")
+st.title("PredictA — Pronostici Serie A", text_alignment="center")
+st.markdown("Modello predittivo basato su Dixon-Coles, forma recente e quote dei bookmaker", text_alignment="center")
 
+st.space("medium")
+
+# Team selector row
 lista_squadre = sorted(stats["Squadra"].unique().tolist())
-col1, col2, col3 = st.columns([2, 2, 1])
+col1, col2, col3 = st.columns([2, 2, 1], vertical_alignment="bottom")
 with col1:
-    squadra_casa = st.selectbox("🏠 Squadra in casa", lista_squadre, key="home")
+    squadra_casa = st.selectbox(":material/home: Squadra in casa", lista_squadre, key="home")
 with col2:
-    squadra_trasferta = st.selectbox("🚌 Squadra in trasferta", lista_squadre, key="away")
+    squadra_trasferta = st.selectbox(":material/directions_bus: Squadra in trasferta", lista_squadre, key="away")
 with col3:
-    st.write(""); st.write("")
-    calcola = st.button("📊 CALCOLA", width='stretch', type="primary")
+    calcola = st.button(":material/calculate: Calcola", width="stretch", type="primary")
 
 if calcola:
     if squadra_casa == squadra_trasferta:
-        st.warning("⚠️ Scegli due squadre diverse!")
+        st.warning(":material/warning: Scegli due squadre diverse!")
     elif peso_storico < 0:
-        st.error("⚠️ Somma pesi > 1.")
+        st.error(":material/error: La somma dei pesi supera il 100%")
     else:
         risultato = stima_probabilita(df, stats, squadra_casa, squadra_trasferta,
                               peso_forma, peso_scontri, peso_quote)
         if risultato is None:
-            st.error("Dati insufficienti.")
+            st.error(":material/error: Dati insufficienti per il calcolo.")
         else:
-            st.markdown("---")
-            col_c1, col_c2, col_c3 = st.columns(3)
+            st.space("medium")
+
+            # --- Probability cards ---
+            col_c1, col_c2, col_c3 = st.columns(3, gap="medium")
+
             with col_c1:
-                st.markdown(f"""<div class="probability-card home"><div>Vittoria {squadra_casa}</div><div class="big-number">{risultato['p_1']:.1%}</div><div>1</div></div>""", unsafe_allow_html=True)
+                with st.container(border=True):
+                    st.markdown(f"**:material/home: {squadra_casa}**")
+                    st.markdown(f"## {risultato['p_1']:.1%}")
+                    st.badge("1", color="green")
+
             with col_c2:
-                st.markdown(f"""<div class="probability-card draw"><div>Pareggio</div><div class="big-number">{risultato['p_X']:.1%}</div><div>X</div></div>""", unsafe_allow_html=True)
+                with st.container(border=True):
+                    st.markdown("**:material/handshake: Pareggio**")
+                    st.markdown(f"## {risultato['p_X']:.1%}")
+                    st.badge("X", color="gray")
+
             with col_c3:
-                st.markdown(f"""<div class="probability-card away"><div>Vittoria {squadra_trasferta}</div><div class="big-number">{risultato['p_2']:.1%}</div><div>2</div></div>""", unsafe_allow_html=True)
+                with st.container(border=True):
+                    st.markdown(f"**:material/directions_bus: {squadra_trasferta}**")
+                    st.markdown(f"## {risultato['p_2']:.1%}")
+                    st.badge("2", color="red")
 
-            col_g1, col_g2 = st.columns(2)
+            st.space("medium")
+
+            # --- xG + Over/Under row ---
+            col_g1, col_g2 = st.columns(2, gap="medium")
+
             with col_g1:
-                st.markdown('<p class="section-title">⚽ Gol Attesi</p>', unsafe_allow_html=True)
-                met1, met2 = st.columns(2)
-                met1.metric(squadra_casa, f"{risultato['xG_casa']:.2f}")
-                met2.metric(squadra_trasferta, f"{risultato['xG_trasferta']:.2f}")
+                with st.container(border=True):
+                    st.markdown("**Gol attesi (xG)**")
+                    met1, met2 = st.columns(2)
+                    met1.metric(
+                        squadra_casa,
+                        f"{risultato['xG_casa']:.2f}",
+                        help="Gol attesi per la squadra di casa"
+                    )
+                    met2.metric(
+                        squadra_trasferta,
+                        f"{risultato['xG_trasferta']:.2f}",
+                        help="Gol attesi per la squadra in trasferta"
+                    )
+
             with col_g2:
-                st.markdown('<p class="section-title">📊 Over / Under</p>', unsafe_allow_html=True)
-                st.metric("Gol totali attesi", f"{risultato['gol_totali_attesi']:.2f}")
-                st.markdown(f"Over 1.5: **{risultato['over_15']:.1%}** | Over 2.5: **{risultato['over_25']:.1%}** | Under 2.5: **{risultato['under_25']:.1%}**")
+                with st.container(border=True):
+                    st.markdown("**Over / Under**")
+                    st.metric("Gol totali attesi", f"{risultato['gol_totali_attesi']:.2f}")
+                    st.markdown(
+                        f":green-badge[Over 1.5 {risultato['over_15']:.0%}] "
+                        f":orange-badge[Over 2.5 {risultato['over_25']:.0%}] "
+                        f":blue-badge[Under 2.5 {risultato['under_25']:.0%}]"
+                    )
 
-            # 👇 NUOVO BLOCCO QUOTE
+            # --- Quote effect expander ---
             if risultato['quote_presenti']:
-                st.info("📊 Quote bookmaker disponibili per questo match! Il modello le sta usando.")
-                with st.expander("🔍 Vedi effetto quote"):
+                st.info(":material/analytics: Quote bookmaker disponibili per questo match — il modello le sta usando.", icon=":material/analytics:")
+                with st.expander(":material/compare_arrows: Vedi effetto delle quote"):
                     col_q1, col_q2, col_q3 = st.columns(3)
-                    col_q1.metric("1 (senza quote)", f"{risultato['p_1_base']:.1%}")
-                    col_q2.metric("X (senza quote)", f"{risultato['p_X_base']:.1%}")
-                    col_q3.metric("2 (senza quote)", f"{risultato['p_2_base']:.1%}")
-            # 👆 FINE NUOVO BLOCCO
+                    col_q1.metric(f"1 ({squadra_casa}) senza quote", f"{risultato['p_1_base']:.1%}")
+                    col_q2.metric("X senza quote", f"{risultato['p_X_base']:.1%}")
+                    col_q3.metric(f"2 ({squadra_trasferta}) senza quote", f"{risultato['p_2_base']:.1%}")
 
-            st.markdown("---")
-            col_re1, col_re2 = st.columns(2)
+            st.space("medium")
+
+            # --- Exact scores + Form row ---
+            col_re1, col_re2 = st.columns(2, gap="medium")
+
             with col_re1:
-                st.markdown('<p class="section-title">🎯 Risultati Esatti più Probabili</p>', unsafe_allow_html=True)
-                for re, prob in risultato['top_risultati']:
-                    st.markdown(f"**{re}** — {prob:.1%}")
+                with st.container(border=True):
+                    st.markdown("**Risultati esatti più probabili**")
+                    for re, prob in risultato['top_risultati']:
+                        st.markdown(f":material/sports_score: **{re}** — {prob:.1%}")
+
             with col_re2:
-                st.markdown('<p class="section-title">📈 Forma Recente</p>', unsafe_allow_html=True)
-                fatti_c, subiti_c, _, _, risultati_c, _ = calcola_forma(df, squadra_casa)
-                fatti_t, subiti_t, _, _, risultati_t, _ = calcola_forma(df, squadra_trasferta)
-                col_f1, col_f2 = st.columns(2)
-                with col_f1:
-                    st.write(f"**{squadra_casa}**")
-                    if fatti_c is not None:
-                        pallini = "".join(["🟢" if r=="V" else "🟡" if r=="N" else "🔴" for r in risultati_c])
-                        st.write(f"Forma: {pallini}")
-                with col_f2:
-                    st.write(f"**{squadra_trasferta}**")
-                    if fatti_t is not None:
-                        pallini = "".join(["🟢" if r=="V" else "🟡" if r=="N" else "🔴" for r in risultati_t])
-                        st.write(f"Forma: {pallini}")
+                with st.container(border=True):
+                    st.markdown("**Forma recente**")
+                    fatti_c, subiti_c, _, _, risultati_c, _ = calcola_forma(df, squadra_casa)
+                    fatti_t, subiti_t, _, _, risultati_t, _ = calcola_forma(df, squadra_trasferta)
+                    col_f1, col_f2 = st.columns(2)
+                    with col_f1:
+                        st.markdown(f"**:material/home: {squadra_casa}**")
+                        if fatti_c is not None:
+                            pallini = "".join([":green[●]" if r=="V" else ":orange[●]" if r=="N" else ":red[●]" for r in risultati_c])
+                            st.markdown(f"Forma: {pallini}")
+                    with col_f2:
+                        st.markdown(f"**:material/directions_bus: {squadra_trasferta}**")
+                        if fatti_t is not None:
+                            pallini = "".join([":green[●]" if r=="V" else ":orange[●]" if r=="N" else ":red[●]" for r in risultati_t])
+                            st.markdown(f"Forma: {pallini}")
 
-            st.markdown("---")
-            st.markdown('<p class="section-title">⚔️ Ultimi Scontri Diretti</p>', unsafe_allow_html=True)
-            scontri = risultato['scontri']
-            if scontri is not None and scontri[0] is not None:
-                _, _, v1, pareggi_s, v2, tabella_scontri = scontri
-                st.write(f"{squadra_casa} {v1} - {pareggi_s} - {v2} {squadra_trasferta}")
-                st.dataframe(tabella_scontri[["HomeTeam", "AwayTeam", "FTHG", "FTAG"]], hide_index=True)
-            else:
-                st.info("Nessuno scontro diretto.")
+            st.space("medium")
 
-st.markdown("---")
-st.caption("⚽ Modello predittivo a scopo dimostrativo.")
+            # --- Head-to-head ---
+            with st.container(border=True):
+                st.markdown("**Ultimi scontri diretti**")
+                scontri = risultato['scontri']
+                if scontri is not None and scontri[0] is not None:
+                    _, _, v1, pareggi_s, v2, tabella_scontri = scontri
+                    st.markdown(f"{squadra_casa} **{v1}** — {pareggi_s} — **{v2}** {squadra_trasferta}")
+                    st.dataframe(
+                        tabella_scontri[["HomeTeam", "AwayTeam", "FTHG", "FTAG"]]
+                        .rename(columns={"HomeTeam": "Casa", "AwayTeam": "Trasferta", "FTHG": "Gol C", "FTAG": "Gol T"}),
+                        hide_index=True, width="stretch"
+                    )
+                else:
+                    st.caption(":material/info: Nessuno scontro diretto disponibile.")
+
+st.space("large")
+st.caption(":material/sports_soccer: PredictA — Modello predittivo a scopo dimostrativo. I dati provengono da fonti pubbliche.", text_alignment="center")

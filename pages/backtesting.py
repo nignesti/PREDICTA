@@ -8,56 +8,10 @@ from sklearn.metrics import accuracy_score, confusion_matrix, precision_recall_f
 from modello import (stats_pesate_squadre, distribuzione_punteggi, esiti_da_matrice, rps,
                      prepara_elo, elo_asof_batch, calibra_regressione_elo, xg_da_elo_calibrato)
 
-st.set_page_config(page_title="Backtesting", page_icon="📊", layout="wide")
+st.set_page_config(page_title="PredictA — Backtesting", page_icon=":material/bar_chart:", layout="wide")
 
-# ------------------------------------------------------------
-# CSS CORRETTO (testo bianco su sfondo colorato)
-# ------------------------------------------------------------
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 2rem;
-        font-weight: 700;
-        text-align: center;
-        margin-bottom: 1.5rem;
-        color: #1a1a1a;
-    }
-    .metric-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        border-radius: 10px;
-        padding: 1.5rem;
-        text-align: center;
-        color: white;
-        margin: 0.3rem;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
-    .metric-card.green { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); }
-    .metric-card.blue { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); }
-    .metric-card.orange { background: linear-gradient(135deg, #f12711 0%, #f5af19 100%); }
-    .metric-card.purple { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-    .metric-value {
-        font-size: 2.5rem;
-        font-weight: 800;
-        color: white;
-    }
-    .metric-label {
-        font-size: 0.9rem;
-        color: rgba(255,255,255,0.9);
-        margin-top: 0.3rem;
-    }
-    .section-title {
-        font-size: 1.3rem;
-        font-weight: 600;
-        margin-top: 1.5rem;
-        margin-bottom: 0.8rem;
-        border-bottom: 2px solid #e0e0e0;
-        padding-bottom: 0.3rem;
-        color: #1a1a1a;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-st.markdown('<p class="main-header">📊 Backtesting - Validazione del Modello</p>', unsafe_allow_html=True)
+st.title("Backtesting — Validazione del modello", text_alignment="center")
+st.markdown("Simulazione walk-forward su stagioni consecutive per validare accuratezza e calibrazione del modello predittivo.", text_alignment="center")
 
 # ------------------------------------------------------------
 # CARICA DATI
@@ -82,40 +36,46 @@ elo_df = load_elo()
 # ------------------------------------------------------------
 # SIDEBAR
 # ------------------------------------------------------------
-st.sidebar.markdown("### ⚙️ Impostazioni Backtesting")
+st.sidebar.markdown("### :material/tune: Impostazioni backtesting")
 
-stagioni_disponibili = sorted(df["Stagione"].astype(str).unique())
-n_stagioni_test = st.sidebar.slider(
-    "Stagioni di test", 1, min(5, len(stagioni_disponibili) - 1), 1,
-    help="Le ultime N stagioni vengono usate come test set (walk-forward), tutte le precedenti come training."
-)
-stagioni_test = stagioni_disponibili[-n_stagioni_test:]
+stage = st.sidebar.container(border=True)
+with stage:
+    st.markdown("**Walk-forward**")
+    stagioni_disponibili = sorted(df["Stagione"].astype(str).unique())
+    n_stagioni_test = st.slider(
+        "Stagioni di test", 1, min(5, len(stagioni_disponibili) - 1), 1,
+        help="Le ultime N stagioni vengono usate come test set (walk-forward), tutte le precedenti come training."
+    )
+    stagioni_test = stagioni_disponibili[-n_stagioni_test:]
 
-peso_forma_bt = st.sidebar.slider("Peso forma", 0.0, 1.0, 0.10, 0.05,
-                    help="Validato su 3 stagioni indipendenti: un peso piccolo aiuta, oltre 0.20-0.25 peggiora.")
-peso_scontri_bt = st.sidebar.slider("Peso scontri", 0.0, 0.5, 0.0, 0.05,
-                    help="Su 3 stagioni di backtest non aggiunge valore misurabile una volta pesate bene le quote.")
-n_partite_forma = st.sidebar.slider("Partite per forma", 3, 10, 3,
-                    help="Poco sensibile in questo range; 3 e' risultato leggermente migliore nella grid search.")
-peso_elo_bt = st.sidebar.slider("Peso Elo (ClubElo.com)", 0.0, 1.0, 0.0, 0.05,
-                    help="Rating Elo storico da clubelo.com, non ancora validato: default a 0 finché non testato.")
-peso_quote_bt = st.sidebar.slider("Peso quote", 0.0, 1.0, 0.90, 0.05)
+with st.sidebar.container(border=True):
+    st.markdown("**Pesi del modello**")
+    peso_forma_bt = st.slider("Forma recente", 0.0, 1.0, 0.10, 0.05,
+                        help="Validato su 3 stagioni indipendenti: un peso piccolo aiuta, oltre 0.20-0.25 peggiora.")
+    peso_scontri_bt = st.slider("Scontri diretti", 0.0, 0.5, 0.0, 0.05,
+                        help="Su 3 stagioni di backtest non aggiunge valore misurabile una volta pesate bene le quote.")
+    n_partite_forma = st.slider("Partite per forma", 3, 10, 3,
+                        help="Poco sensibile in questo range; 3 e' risultato leggermente migliore nella grid search.")
+    peso_elo_bt = st.slider("Elo (ClubElo.com)", 0.0, 1.0, 0.0, 0.05,
+                        help="Rating Elo storico da clubelo.com, non ancora validato: default a 0 finché non testato.")
+    peso_quote_bt = st.slider("Quote bookmaker", 0.0, 1.0, 0.90, 0.05)
 
-st.sidebar.markdown("---")
-st.sidebar.markdown("#### 🧮 Iperparametri Dixon-Coles")
-emivita_giorni_bt = st.sidebar.slider(
-    "Emivita statistiche storiche (giorni)", 90, 3650, 730, 90,
-    help="Dopo quanti giorni una partita pesa la metà nelle medie storiche. Sostituisce la media semplice su 33 stagioni."
-)
-rho_bt = st.sidebar.slider(
-    "Rho Dixon-Coles (correzione bassi punteggi)", -0.30, 0.10, -0.10, 0.02,
-    help="Corregge la sottostima dei pareggi tipica di un Poisson indipendente. Valori tipici in letteratura: -0.05/-0.20."
-)
+with st.sidebar.container(border=True):
+    st.markdown("**Iperparametri Dixon-Coles**")
+    emivita_giorni_bt = st.slider(
+        "Emivita storica (giorni)", 90, 3650, 730, 90,
+        help="Dopo quanti giorni una partita pesa la metà nelle medie storiche. Sostituisce la media semplice su 33 stagioni."
+    )
+    rho_bt = st.slider(
+        "Rho (correzione bassi punteggi)", -0.30, 0.10, -0.10, 0.02,
+        help="Corregge la sottostima dei pareggi tipica di un Poisson indipendente. Valori tipici in letteratura: -0.05/-0.20."
+    )
+
 train_df = df[~df["Stagione"].astype(str).isin(stagioni_test)].copy()
 test_df = df[df["Stagione"].astype(str).isin(stagioni_test)].copy()
 
-st.sidebar.caption(f"Training: {len(train_df):,} partite")
-st.sidebar.caption(f"Test: {len(test_df):,} partite ({', '.join(stagioni_test)})")
+st.sidebar.caption(f":material/database: Training: **{len(train_df):,}** partite")
+st.sidebar.caption(f":material/science: Test: **{len(test_df):,}** partite ({', '.join(stagioni_test)})")
 
 # ------------------------------------------------------------
 # STATISTICHE SU TRAINING
@@ -314,8 +274,8 @@ def valuta_tutte(componenti, peso_forma, peso_scontri, peso_quote, rho, peso_elo
 # ------------------------------------------------------------
 # BOTTONE BACKTESTING
 # ------------------------------------------------------------
-if st.sidebar.button("🚀 Esegui Backtesting", width='stretch', type="primary"):
-    with st.spinner("Simulando le previsioni... Questo potrebbe richiedere qualche minuto."):
+if st.sidebar.button(":material/play_arrow: Esegui backtesting", width="stretch", type="primary"):
+    with st.spinner(":material/hourglass_top: Simulando le previsioni... Potrebbe richiedere qualche minuto."):
         componenti = precompute_tutte(emivita_giorni_bt, n_partite_forma, mostra_progress=True)
         predizioni, reali, stagioni_pred, probabilita = valuta_tutte(
             componenti, peso_forma_bt, peso_scontri_bt, peso_quote_bt, rho_bt, peso_elo_bt)
@@ -324,85 +284,114 @@ if st.sidebar.button("🚀 Esegui Backtesting", width='stretch', type="primary")
         acc = accuracy_score(reali, predizioni)
         cm = confusion_matrix(reali, predizioni, labels=["1", "X", "2"])
         precision, recall, f1, support = precision_recall_fscore_support(reali, predizioni, labels=["1", "X", "2"])
-        benchmark = reali.count("1") / len(reali)  # accuratezza di "predici sempre 1", calcolata sul test set reale
+        benchmark = reali.count("1") / len(reali)
 
-        # Metriche probabilistiche: l'accuratezza da sola premia previsioni "decise"
-        # anche se mal calibrate, RPS e log-loss no.
+        # Metriche probabilistiche
         rps_medio = np.mean([rps({"1": p[0], "X": p[2], "2": p[1]}, r) for p, r in zip(probabilita, reali)])
         logloss = log_loss(reali, probabilita, labels=["1", "2", "X"])
 
         # ------------------------------------------------------------
         # VISUALIZZA RISULTATI
         # ------------------------------------------------------------
-        st.markdown("---")
-        st.markdown("### 📊 Risultati Backtesting")
+        st.space("medium")
+        st.markdown("### Risultati backtesting")
 
-        # Box metriche con colori corretti
-        col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+        col_m1, col_m2, col_m3, col_m4 = st.columns(4, gap="medium")
+
         with col_m1:
-            st.markdown(f"""<div class="metric-card green"><div class="metric-value">{acc:.1%}</div><div class="metric-label">Accuratezza 1X2</div></div>""", unsafe_allow_html=True)
+            with st.container(border=True):
+                st.markdown(f"## {acc:.1%}")
+                st.caption("Accuratezza 1X2")
+                st.badge("✅ Sopra benchmark" if acc > benchmark else "❌ Sotto benchmark", color="green" if acc > benchmark else "red")
+
         with col_m2:
             corrette = sum(1 for p, r in zip(predizioni, reali) if p == r)
-            st.markdown(f"""<div class="metric-card blue"><div class="metric-value">{corrette}/{len(reali)}</div><div class="metric-label">Partite indovinate</div></div>""", unsafe_allow_html=True)
+            with st.container(border=True):
+                st.markdown(f"## {corrette}/{len(reali)}")
+                st.caption("Partite indovinate")
+                st.badge(f"Benchmark: {benchmark:.0%}", color="gray")
+
         with col_m3:
-            st.markdown(f"""<div class="metric-card purple"><div class="metric-value">{rps_medio:.3f}</div><div class="metric-label">RPS medio (0=perfetto)</div></div>""", unsafe_allow_html=True)
+            with st.container(border=True):
+                st.markdown(f"## {rps_medio:.3f}")
+                st.caption("RPS medio")
+                st.badge("0 = perfetto", color="blue")
+
         with col_m4:
-            st.markdown(f"""<div class="metric-card orange"><div class="metric-value">{logloss:.3f}</div><div class="metric-label">Log-loss (più basso meglio)</div></div>""", unsafe_allow_html=True)
+            with st.container(border=True):
+                st.markdown(f"## {logloss:.3f}")
+                st.caption("Log-loss")
+                st.badge("Più basso = meglio", color="orange")
 
-        st.caption(f"Accuratezza vs benchmark \"predici sempre 1\" ({benchmark:.0%}): {'✅ sopra' if acc > benchmark else '❌ sotto'}. "
-                   "RPS e log-loss valutano quanto sono ben calibrate le probabilità, non solo se la previsione più probabile è quella giusta.")
+        st.caption(f"RPS e log-loss valutano quanto sono ben calibrate le probabilità, non solo se la previsione più probabile è quella giusta. Benchmark \"predici sempre 1\": {benchmark:.0%}.")
 
-        # Matrice di confusione
-        st.markdown("---")
-        st.markdown("### 🔍 Matrice di Confusione")
+        st.space("medium")
 
-        fig_cm = go.Figure(data=go.Heatmap(
-            z=cm,
-            x=["1 (Casa)", "X (Pareggio)", "2 (Trasferta)"],
-            y=["1 (Casa)", "X (Pareggio)", "2 (Trasferta)"],
-            text=cm,
-            texttemplate="%{text}",
-            textfont={"size": 16},
-            colorscale="Blues"
-        ))
-        fig_cm.update_layout(height=400, xaxis_title="Predetto", yaxis_title="Reale")
-        st.plotly_chart(fig_cm, width='stretch')
+        # --- Confusion matrix + per-class metrics row ---
+        col_cm1, col_cm2 = st.columns([3, 2], gap="medium")
 
-        # Metriche per classe
-        st.markdown("---")
-        st.markdown("### 📋 Metriche per Classe")
+        with col_cm1:
+            with st.container(border=True):
+                st.markdown("**Matrice di confusione**")
+                fig_cm = go.Figure(data=go.Heatmap(
+                    z=cm,
+                    x=["1 (Casa)", "X (Pareggio)", "2 (Trasferta)"],
+                    y=["1 (Casa)", "X (Pareggio)", "2 (Trasferta)"],
+                    text=cm,
+                    texttemplate="%{text}",
+                    textfont={"size": 16},
+                    colorscale="Greens"
+                ))
+                fig_cm.update_layout(
+                    height=380, xaxis_title="Predetto", yaxis_title="Reale",
+                    paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                    font=dict(color='#E6EDF3')
+                )
+                st.plotly_chart(fig_cm, width='stretch')
 
-        metrics_df = pd.DataFrame({
-            "Classe": ["1 (Casa)", "X (Pareggio)", "2 (Trasferta)"],
-            "Precision": precision,
-            "Recall": recall,
-            "F1-Score": f1,
-            "Supporto": support
-        })
-        st.dataframe(metrics_df, hide_index=True, width='stretch')
+        with col_cm2:
+            with st.container(border=True):
+                st.markdown("**Metriche per classe**")
+                metrics_df = pd.DataFrame({
+                    "Classe": ["1 (Casa)", "X (Pareggio)", "2 (Trasferta)"],
+                    "Precision": [f"{p:.1%}" for p in precision],
+                    "Recall": [f"{r:.1%}" for r in recall],
+                    "F1": [f"{f:.1%}" for f in f1],
+                    "N": support
+                })
+                st.dataframe(metrics_df, hide_index=True, width="stretch")
 
-        # Grafico precision/recall
-        fig_pr = go.Figure()
-        fig_pr.add_trace(go.Bar(name="Precision", x=["1", "X", "2"], y=precision, marker_color="#2a5298"))
-        fig_pr.add_trace(go.Bar(name="Recall", x=["1", "X", "2"], y=recall, marker_color="#38ef7d"))
-        fig_pr.add_trace(go.Bar(name="F1-Score", x=["1", "X", "2"], y=f1, marker_color="#f5af19"))
-        fig_pr.update_layout(height=400, barmode='group')
-        st.plotly_chart(fig_pr, width='stretch')
+            with st.container(border=True):
+                st.markdown("**Precision / Recall / F1**")
+                fig_pr = go.Figure()
+                fig_pr.add_trace(go.Bar(name="Precision", x=["1", "X", "2"], y=precision,
+                                        marker_color="#00E676"))
+                fig_pr.add_trace(go.Bar(name="Recall", x=["1", "X", "2"], y=recall,
+                                        marker_color="#448AFF"))
+                fig_pr.add_trace(go.Bar(name="F1", x=["1", "X", "2"], y=f1,
+                                        marker_color="#FF9100"))
+                fig_pr.update_layout(
+                    height=280, barmode='group',
+                    paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                    font=dict(color='#E6EDF3'), margin=dict(l=10, r=10, t=10, b=10)
+                )
+                st.plotly_chart(fig_pr, width='stretch')
 
-        # Accuratezza per stagione (solo se il test set copre più di una stagione)
+        # Accuratezza per stagione (solo se multistagione)
         if n_stagioni_test > 1:
-            st.markdown("---")
-            st.markdown("### 📅 Accuratezza per Stagione")
-            df_ris = pd.DataFrame({"Stagione": stagioni_pred, "corretta": [p == r for p, r in zip(predizioni, reali)]})
-            breakdown = df_ris.groupby("Stagione")["corretta"].mean().reset_index()
-            breakdown.columns = ["Stagione", "Accuratezza"]
-            st.dataframe(breakdown.style.format({"Accuratezza": "{:.1%}"}), hide_index=True, width='stretch')
+            st.space("medium")
+            with st.container(border=True):
+                st.markdown("**Accuratezza per stagione**")
+                df_ris = pd.DataFrame({"Stagione": stagioni_pred, "corretta": [p == r for p, r in zip(predizioni, reali)]})
+                breakdown = df_ris.groupby("Stagione")["corretta"].mean().reset_index()
+                breakdown.columns = ["Stagione", "Accuratezza"]
+                breakdown["Accuratezza"] = breakdown["Accuratezza"].apply(lambda x: f"{x:.1%}")
+                st.dataframe(breakdown, hide_index=True, width="stretch")
 
 # ------------------------------------------------------------
-# CONFRONTO TRA CONFIGURAZIONI FISSE DEL MODELLO
+# CONFRONTO TRA CONFIGURAZIONI
 # ------------------------------------------------------------
-st.sidebar.markdown("---")
-if st.sidebar.button("🔬 Confronta configurazioni", width='stretch'):
+if st.sidebar.button(":material/compare_arrows: Confronta configurazioni", width="stretch"):
     configurazioni = [
         ("Solo storico", 0.0, 0.0, 0.0, 0.0),
         ("Storico + Forma", 0.5, 0.0, 0.0, 0.0),
@@ -413,7 +402,7 @@ if st.sidebar.button("🔬 Confronta configurazioni", width='stretch'):
         ("Solo Elo (ClubElo.com)", 0.0, 0.0, 0.0, 1.0),
         ("Ottimale + Elo (pesi correnti della sidebar)", peso_forma_bt, peso_scontri_bt, peso_quote_bt, peso_elo_bt),
     ]
-    with st.spinner("Calcolo le componenti (storico, forma, scontri, quote, Elo) una sola volta..."):
+    with st.spinner(":material/hourglass_top: Calcolo componenti una sola volta per tutte le configurazioni..."):
         componenti = precompute_tutte(emivita_giorni_bt, n_partite_forma, mostra_progress=True)
 
     risultati_confronto = []
@@ -426,17 +415,25 @@ if st.sidebar.button("🔬 Confronta configurazioni", width='stretch'):
             "RPS medio": rps_c,
         })
 
-    st.markdown("---")
-    st.markdown("### 🔬 Confronto tra Configurazioni del Modello")
+    st.space("medium")
+    st.markdown("### Confronto configurazioni del modello")
+
     df_confronto = pd.DataFrame(risultati_confronto)
     fig_confronto = go.Figure(go.Bar(
         x=df_confronto["Configurazione"], y=df_confronto["Accuratezza"],
         text=[f"{a:.1%}" for a in df_confronto["Accuratezza"]], textposition="outside",
-        marker_color=["#3498db", "#2ecc71", "#9b59b6", "#e67e22", "#95a5a6", "#1abc9c", "#e74c3c", "#f1c40f"]
+        marker_color=["#448AFF", "#00E676", "#B388FF", "#FF9100", "#8B949E", "#00BCD4", "#FF1744", "#FFD600"]
     ))
-    fig_confronto.update_layout(height=400, yaxis_tickformat=".0%", yaxis_title="Accuratezza 1X2", yaxis_range=[0, 1])
+    fig_confronto.update_layout(
+        height=400, yaxis_tickformat=".0%", yaxis_title="Accuratezza 1X2",
+        yaxis_range=[0, 1], paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#E6EDF3')
+    )
     st.plotly_chart(fig_confronto, width='stretch')
-    st.dataframe(df_confronto.style.format({"Accuratezza": "{:.1%}", "RPS medio": "{:.3f}"}), hide_index=True, width='stretch')
+    df_confronto_display = df_confronto.copy()
+    df_confronto_display["Accuratezza"] = df_confronto_display["Accuratezza"].apply(lambda x: f"{x:.1%}")
+    df_confronto_display["RPS medio"] = df_confronto_display["RPS medio"].apply(lambda x: f"{x:.3f}")
+    st.dataframe(df_confronto_display, hide_index=True, width="stretch")
 
-st.markdown("---")
-st.caption("📊 Backtesting walk-forward: le stagioni di test sono sempre le più recenti, quelle precedenti sono usate per l'addestramento.")
+st.space("large")
+st.caption(":material/bar_chart: Backtesting walk-forward: le stagioni di test sono sempre le più recenti, quelle precedenti sono usate per l'addestramento.", text_alignment="center")
