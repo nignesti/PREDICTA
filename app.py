@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-from modello import stats_pesate_squadre, distribuzione_punteggi, esiti_da_matrice
+from modello import stats_pesate_squadre, distribuzione_punteggi, esiti_da_matrice, probabilita_shin
 
 # Iperparametri Dixon-Coles validati via backtest (vedi pages/backtesting.py):
 # EMIVITA_GIORNI: dopo quanti giorni una partita storica pesa la metà nelle medie
@@ -204,11 +204,15 @@ def stima_probabilita(df, stats, squadra_casa, squadra_trasferta,
                 prob_1_quote = (1 / quote_valide[colonne_quota[0]]).mean()
                 prob_X_quote = (1 / quote_valide[colonne_quota[1]]).mean()
                 prob_2_quote = (1 / quote_valide[colonne_quota[2]]).mean()
-                # Normalizza (rimuovi il margine del bookmaker)
-                somma = prob_1_quote + prob_X_quote + prob_2_quote
-                prob_1_quote /= somma
-                prob_X_quote /= somma
-                prob_2_quote /= somma
+                # Rimuovi il margine del bookmaker con la correzione di Shin
+                # (1992/1993) invece della normalizzazione proporzionale
+                # semplice: valida su 3 stagioni indipendenti in
+                # pages/backtesting.py, migliora leggermente l'RPS (calibrazione)
+                # senza peggiorare l'accuratezza. "Quote equivalenti" perché qui
+                # partiamo da probabilità già mediate su più scontri diretti,
+                # non dalle quote di una singola partita.
+                quote_equivalenti = [1 / prob_1_quote, 1 / prob_X_quote, 1 / prob_2_quote]
+                prob_1_quote, prob_X_quote, prob_2_quote = probabilita_shin(quote_equivalenti)
                 quote_presenti = True
 
     # --- COMBINAZIONE ---
