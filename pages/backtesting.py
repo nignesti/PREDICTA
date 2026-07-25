@@ -7,7 +7,7 @@ from sklearn.metrics import accuracy_score, confusion_matrix, precision_recall_f
 
 from modello import (stats_pesate_squadre, distribuzione_punteggi, esiti_da_matrice, rps,
                      prepara_elo, elo_asof_batch, calibra_regressione_elo, xg_da_elo_calibrato,
-                     probabilita_shin)
+                     probabilita_shin, medie_lega_pesate)
 
 st.set_page_config(page_title="PredictA — Backtesting", page_icon=":material/bar_chart:", layout="wide")
 
@@ -92,6 +92,18 @@ with st.sidebar.container(border=True):
              "(55.22% contro 54.79%) e l'RPS leggermente. Default: chiusura.",
     )
     fonte_quote_bt = "chiusura" if fonte_quote_bt.startswith("Chiusura") else "apertura"
+    medie_lega_bt = st.selectbox(
+        "Medie di lega (normalizzatore xG)", ["Pesate nel tempo", "Storiche (media semplice)"],
+        help="Come si calcola la media gol di campionato a cui viene rapportata la forza di ogni squadra. "
+             "Le statistiche di squadra decadono con emivita 730 giorni (descrivono gli ultimi 2-4 anni), "
+             "mentre la media storica e' su ~30 stagioni: due epoche diverse, con un bias pro-casa del ~15% "
+             "sul rapporto degli xG. Validato in valida_medie_lega.py: sul modello statistico PURO (peso "
+             "quote 0) la versione pesata vale +1.41 punti percentuali (49.96% contro 48.55%) e RPS 0.2003 "
+             "contro 0.2067, coerente in 3 stagioni su 3, riducendo le previsioni '1' dal 76.9% al 72.2%. "
+             "Nel blend di produzione l'accuratezza e' indistinguibile (4 partite discordanti su 2.659) ma "
+             "l'RPS migliora in modo statisticamente significativo su 7 stagioni. Default: pesate.",
+    )
+    medie_lega_bt = "pesate" if medie_lega_bt.startswith("Pesate") else "storiche"
 
 with st.sidebar.container(border=True):
     st.markdown("**Iperparametri Dixon-Coles**")
@@ -158,7 +170,7 @@ def scontri_diretti_bt(df_prima, squadra1, squadra2, ultimi_n=10):
     return np.mean(gol_fatti_s1), np.mean(gol_subiti_s1)
 
 def precompute_componente(idx_test, half_life_giorni, n_partite_forma, elo_casa=None, elo_trasferta=None,
-                          metodo_quote="proporzionale", fonte_quote="apertura"):
+                          metodo_quote="proporzionale", fonte_quote="apertura", medie_lega="storiche"):
     """Calcola le componenti costose (storico pesato nel tempo, forma, scontri
     diretti, quote) per una partita di test. Dipendono solo da half_life_giorni,
     n_partite_forma, metodo_quote e fonte_quote, MAI dai pesi forma/scontri/quote:
@@ -179,18 +191,28 @@ def precompute_componente(idx_test, half_life_giorni, n_partite_forma, elo_casa=
     if c.empty or t.empty:
         return None
 
-    xG_casa_storico = (c["gol_fatti_casa_storico"].values[0] / media_gol_casa) * (t["gol_subiti_trasferta_storico"].values[0] / media_gol_trasferta) * media_gol_casa
-    xG_trasf_storico = (t["gol_fatti_trasferta_storico"].values[0] / media_gol_trasferta) * (c["gol_subiti_casa_storico"].values[0] / media_gol_casa) * media_gol_trasferta
+    # Medie di lega usate come normalizzatore. "storiche" = media semplice su tutto
+    # il training set (comportamento originale); "pesate" = stesso decadimento
+    # esponenziale delle statistiche di squadra, così numeratore e denominatore
+    # descrivono la stessa epoca (vedi medie_lega_pesate in modello.py).
+    if medie_lega == "pesate":
+        m_casa, m_trasferta = medie_lega_pesate(df_prima, riga["Date"], half_life_giorni)
+    else:
+        m_casa, m_trasferta = media_gol_casa, media_gol_trasferta
+    m_generale = (m_casa + m_trasferta) / 2
+
+    xG_casa_storico = (c["gol_fatti_casa_storico"].values[0] / m_casa) * (t["gol_subiti_trasferta_storico"].values[0] / m_trasferta) * m_casa
+    xG_trasf_storico = (t["gol_fatti_trasferta_storico"].values[0] / m_trasferta) * (c["gol_subiti_casa_storico"].values[0] / m_casa) * m_trasferta
 
     fatti_c, subiti_c, fatti_c_home, _ = calcola_forma_bt(df_fino_a_ora, casa, idx_globale, n_partite_forma)
     fatti_t, subiti_t, _, fatti_t_away = calcola_forma_bt(df_fino_a_ora, trasferta, idx_globale, n_partite_forma)
-    xG_casa_forma = (fatti_c_home / media_gol_casa) * (max(subiti_t, 0.3) / media_gol_trasferta) * media_gol_casa if fatti_c_home > 0 else xG_casa_storico
-    xG_trasf_forma = (fatti_t_away / media_gol_trasferta) * (max(subiti_c, 0.3) / media_gol_casa) * media_gol_trasferta if fatti_t_away > 0 else xG_trasf_storico
+    xG_casa_forma = (fatti_c_home / m_casa) * (max(subiti_t, 0.3) / m_trasferta) * m_casa if fatti_c_home > 0 else xG_casa_storico
+    xG_trasf_forma = (fatti_t_away / m_trasferta) * (max(subiti_c, 0.3) / m_casa) * m_trasferta if fatti_t_away > 0 else xG_trasf_storico
 
     gol_fatti_scontri, gol_subiti_scontri = scontri_diretti_bt(df_prima, casa, trasferta, ultimi_n=10)
     if gol_fatti_scontri is not None:
-        xG_casa_scontri = (gol_fatti_scontri / media_gol_generale) * media_gol_casa
-        xG_trasf_scontri = (gol_subiti_scontri / media_gol_generale) * media_gol_trasferta
+        xG_casa_scontri = (gol_fatti_scontri / m_generale) * m_casa
+        xG_trasf_scontri = (gol_subiti_scontri / m_generale) * m_trasferta
         scontri_validi = True
     else:
         xG_casa_scontri, xG_trasf_scontri = xG_casa_storico, xG_trasf_storico
@@ -198,13 +220,23 @@ def precompute_componente(idx_test, half_life_giorni, n_partite_forma, elo_casa=
 
     quote_presenti = False
     prob_1_quote, prob_X_quote, prob_2_quote = 0, 0, 0
-    if fonte_quote == "chiusura" and "OddsAvgCH" in riga.index:
-        colonne_quota = ("OddsAvgCH", "OddsAvgCD", "OddsAvgCA")
-    elif "OddsAvgH" in riga.index:
-        colonne_quota = ("OddsAvgH", "OddsAvgD", "OddsAvgA")
-    else:
-        colonne_quota = ("B365H", "B365D", "B365A")
-    if all(col in riga.index for col in colonne_quota):
+    # Cascata di fonti, valutata PER PARTITA e non una volta per tutte: la quota di
+    # chiusura copre solo dal 2019 (le 8.874 partite precedenti hanno OddsAvgC* a
+    # NaN). Prima si sceglieva il gruppo di colonne guardando `"OddsAvgCH" in
+    # riga.index`, che è sempre vero — è un nome di colonna, non un valore — quindi
+    # con fonte_quote="chiusura" le partite pre-2019 restavano semplicemente senza
+    # quote e valuta_componente riversava tutto il peso sullo storico, facendo
+    # crollare il modello a ~44% invece di ricadere sull'apertura come dichiarato
+    # nell'help della sidebar. Stessa logica di combine_first già usata in app.py.
+    cascata = []
+    if fonte_quote == "chiusura":
+        cascata.append(("OddsAvgCH", "OddsAvgCD", "OddsAvgCA"))
+    cascata.append(("OddsAvgH", "OddsAvgD", "OddsAvgA"))
+    cascata.append(("B365H", "B365D", "B365A"))
+
+    for colonne_quota in cascata:
+        if not all(col in riga.index for col in colonne_quota):
+            continue
         qh, qd, qa = riga[colonne_quota[0]], riga[colonne_quota[1]], riga[colonne_quota[2]]
         if pd.notna(qh) and pd.notna(qd) and pd.notna(qa):
             if metodo_quote == "shin":
@@ -214,6 +246,7 @@ def precompute_componente(idx_test, half_life_giorni, n_partite_forma, elo_casa=
                 somma = prob_1_quote + prob_X_quote + prob_2_quote
                 prob_1_quote /= somma; prob_X_quote /= somma; prob_2_quote /= somma
             quote_presenti = True
+            break
 
     esito = "1" if riga["FTHG"] > riga["FTAG"] else ("X" if riga["FTHG"] == riga["FTAG"] else "2")
 
@@ -288,7 +321,7 @@ def predici_partita_bt(train_df_arg, test_df_arg, idx_test, peso_forma, peso_sco
     return valuta_componente(comp, peso_forma, peso_scontri, peso_quote, rho, peso_elo)
 
 def precompute_tutte(half_life_giorni, n_partite_forma_val, mostra_progress=False, metodo_quote="proporzionale",
-                     fonte_quote="apertura"):
+                     fonte_quote="apertura", medie_lega="storiche"):
     # Lookup Elo calcolato in batch per tutte le partite di test in una volta sola
     # (molto più veloce che una query per partita dentro il ciclo).
     if ELO_DISPONIBILE:
@@ -303,7 +336,8 @@ def precompute_tutte(half_life_giorni, n_partite_forma_val, mostra_progress=Fals
     for i in range(len(test_df)):
         comp = precompute_componente(i, half_life_giorni, n_partite_forma_val,
                                      elo_casa=elo_casa_arr[i], elo_trasferta=elo_trasf_arr[i],
-                                     metodo_quote=metodo_quote, fonte_quote=fonte_quote)
+                                     metodo_quote=metodo_quote, fonte_quote=fonte_quote,
+                                     medie_lega=medie_lega)
         if comp is not None:
             componenti.append(comp)
         if mostra_progress:
@@ -330,7 +364,7 @@ def valuta_tutte(componenti, peso_forma, peso_scontri, peso_quote, rho, peso_elo
 # ------------------------------------------------------------
 if st.sidebar.button(":material/play_arrow: Esegui backtesting", width="stretch", type="primary"):
     with st.spinner(":material/hourglass_top: Simulando le previsioni... Potrebbe richiedere qualche minuto."):
-        componenti = precompute_tutte(emivita_giorni_bt, n_partite_forma, mostra_progress=True, metodo_quote=metodo_quote_bt, fonte_quote=fonte_quote_bt)
+        componenti = precompute_tutte(emivita_giorni_bt, n_partite_forma, mostra_progress=True, metodo_quote=metodo_quote_bt, fonte_quote=fonte_quote_bt, medie_lega=medie_lega_bt)
         predizioni, reali, stagioni_pred, probabilita = valuta_tutte(
             componenti, peso_forma_bt, peso_scontri_bt, peso_quote_bt, rho_bt, peso_elo_bt)
 
@@ -460,7 +494,7 @@ if st.sidebar.button(":material/compare_arrows: Confronta configurazioni", width
             ("Ottimale + Elo (pesi correnti della sidebar)", peso_forma_bt, peso_scontri_bt, peso_quote_bt, peso_elo_bt),
         ]
     with st.spinner(":material/hourglass_top: Calcolo componenti una sola volta per tutte le configurazioni..."):
-        componenti = precompute_tutte(emivita_giorni_bt, n_partite_forma, mostra_progress=True, metodo_quote=metodo_quote_bt, fonte_quote=fonte_quote_bt)
+        componenti = precompute_tutte(emivita_giorni_bt, n_partite_forma, mostra_progress=True, metodo_quote=metodo_quote_bt, fonte_quote=fonte_quote_bt, medie_lega=medie_lega_bt)
 
     risultati_confronto = []
     for nome, pf, ps, pq, pe in configurazioni:

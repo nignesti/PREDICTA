@@ -3,7 +3,8 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-from modello import stats_pesate_squadre, distribuzione_punteggi, esiti_da_matrice, probabilita_shin
+from modello import (stats_pesate_squadre, distribuzione_punteggi, esiti_da_matrice, probabilita_shin,
+                     medie_lega_pesate)
 
 # Iperparametri Dixon-Coles validati via backtest (vedi pages/backtesting.py):
 # EMIVITA_GIORNI: dopo quanti giorni una partita storica pesa la metà nelle medie
@@ -12,6 +13,13 @@ from modello import stats_pesate_squadre, distribuzione_punteggi, esiti_da_matri
 #   Poisson indipendente sottostima sistematicamente i pareggi.
 EMIVITA_GIORNI = 730
 RHO_DIXON_COLES = -0.10
+# PARTITE_FORMA: quante partite recenti entrano nella componente "forma". Deve
+# restare allineato al default dello slider "Partite per forma" in
+# pages/backtesting.py: è il valore risultato migliore nella grid search, e con i
+# pesi di default (peso_storico = 0 per costruzione) è l'unico iperparametro che
+# determina l'xG mostrato dalla dashboard. Prima era 5 qui e 3 nel backtest,
+# quindi la dashboard non girava sulla configurazione validata.
+PARTITE_FORMA = 3
 
 # ------------------------------------------------------------
 # CONFIGURAZIONE PAGINA
@@ -38,8 +46,15 @@ def load_data(path):
     return df
 
 df = load_data(DATA_FILE)
-media_gol_casa = df["FTHG"].mean()
-media_gol_trasferta = df["FTAG"].mean()
+# Medie di lega con lo STESSO decadimento temporale delle statistiche di squadra.
+# Con la media semplice su 33 stagioni (1.5135/1.1433 gol casa/trasferta) rapportata
+# a statistiche decadute con emivita 730 giorni (che descrivono gli ultimi 2-4 anni,
+# 1.3932/1.2121) si confrontavano due epoche diverse: il rapporto fra xG di casa e di
+# trasferta risultava distorto di circa il 15% a favore della casa su ogni partita.
+# Validato in valida_medie_lega.py: sul modello statistico puro vale +1.41 punti
+# percentuali (49.96% contro 48.55%) e riduce le previsioni "1" dal 76.9% al 72.2%.
+media_gol_casa, media_gol_trasferta = medie_lega_pesate(
+    df, data_riferimento=df["Date"].max(), half_life_giorni=EMIVITA_GIORNI)
 vantaggio_casa = media_gol_casa / media_gol_trasferta
 
 # ------------------------------------------------------------
@@ -87,7 +102,7 @@ with st.sidebar:
 # ------------------------------------------------------------
 # FUNZIONI DI CALCOLO (condivise)
 # ------------------------------------------------------------
-def calcola_forma(df, squadra, ultime_n=5):
+def calcola_forma(df, squadra, ultime_n=PARTITE_FORMA):
     casa = df[df["HomeTeam"] == squadra].tail(ultime_n)
     trasferta = df[df["AwayTeam"] == squadra].tail(ultime_n)
     if len(casa) == 0 and len(trasferta) == 0:
@@ -199,21 +214,48 @@ def stima_probabilita(df, stats, squadra_casa, squadra_trasferta,
     if colonne_quota[0] in df.columns and scontri[0] is not None:
         _, _, _, _, _, tabella_scontri = scontri
         if colonne_quota[0] in tabella_scontri.columns:
+            # Gli scontri diretti includono ENTRAMBI gli orientamenti (Milan-Inter e
+            # Inter-Milan): le colonne *H/*A si riferiscono alla squadra di casa di
+            # QUELLA riga, non a squadra_casa. Usarle senza filtrare mescolava la
+            # quota su Milan con quella su Inter, appiattendo la previsione verso la
+            # parità e cancellando il vantaggio campo (su Milan-Inter: p_1 0.41
+            # invece di 0.27, p_2 0.35 invece di 0.49 — errore di ~14 punti
+            # percentuali su una componente pesata 0.90).
+            # Teniamo solo le partite con lo stesso orientamento di quella da
+            # prevedere: è la grandezza che ci serve davvero ("quanto paga il
+            # mercato squadra_casa che ospita squadra_trasferta"), e conserva il
+            # vantaggio campo invece di mediarlo via.
+            stesso_orientamento = tabella_scontri["HomeTeam"] == squadra_casa
+            tabella_quote = tabella_scontri[stesso_orientamento]
+            if tabella_quote.empty:
+                # Nessun precedente con questo orientamento (es. una sola sfida,
+                # giocata in casa dell'altra): ripieghiamo su tutti i precedenti
+                # scambiando H e A dove le squadre erano invertite. Meno preciso
+                # (il vantaggio campo si perde) ma meglio che scartare le quote.
+                tabella_quote = tabella_scontri
+                inverti = tabella_quote["HomeTeam"] != squadra_casa
+            else:
+                inverti = pd.Series(False, index=tabella_quote.index)
+
             # Preferiamo la quota di CHIUSURA (a ridosso del fischio d'inizio,
             # incorpora più informazione di mercato dell'apertura): validata su 3
             # stagioni indipendenti in pages/backtesting.py, migliora l'accuratezza
             # media di 0.43 punti percentuali. Disponibile solo dal 2019: dove manca
             # (scontri diretti più vecchi) ricadiamo sulla quota di apertura per
             # quella singola partita, non sull'intera media.
-            if all(c in tabella_scontri.columns for c in colonne_chiusura):
-                quota_h = tabella_scontri[colonne_chiusura[0]].combine_first(tabella_scontri[colonne_quota[0]])
-                quota_d = tabella_scontri[colonne_chiusura[1]].combine_first(tabella_scontri[colonne_quota[1]])
-                quota_a = tabella_scontri[colonne_chiusura[2]].combine_first(tabella_scontri[colonne_quota[2]])
+            if all(c in tabella_quote.columns for c in colonne_chiusura):
+                quota_h = tabella_quote[colonne_chiusura[0]].combine_first(tabella_quote[colonne_quota[0]])
+                quota_d = tabella_quote[colonne_chiusura[1]].combine_first(tabella_quote[colonne_quota[1]])
+                quota_a = tabella_quote[colonne_chiusura[2]].combine_first(tabella_quote[colonne_quota[2]])
             else:
-                quota_h, quota_d, quota_a = (tabella_scontri[colonne_quota[0]], tabella_scontri[colonne_quota[1]],
-                                             tabella_scontri[colonne_quota[2]])
+                quota_h, quota_d, quota_a = (tabella_quote[colonne_quota[0]], tabella_quote[colonne_quota[1]],
+                                             tabella_quote[colonne_quota[2]])
 
-            quote_valide = pd.DataFrame({"H": quota_h, "D": quota_d, "A": quota_a}).dropna()
+            # Riorienta: quota_1 = quota sulla vittoria di squadra_casa comunque.
+            quota_1 = quota_h.where(~inverti, quota_a)
+            quota_2 = quota_a.where(~inverti, quota_h)
+
+            quote_valide = pd.DataFrame({"H": quota_1, "D": quota_d, "A": quota_2}).dropna()
             if len(quote_valide) > 0:
                 # Converti quote in probabilità implicite e fai la media
                 prob_1_quote = (1 / quote_valide["H"]).mean()

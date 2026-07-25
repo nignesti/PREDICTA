@@ -1,8 +1,16 @@
+# 🔮 PredictA — Documento completo
+
+Questo file è la **concatenazione** di `readme.md` (documentazione utente) e `ROADMAP.md` (piano tecnico e registro degli esperimenti), pensata per essere condivisa o data in pasto a un revisore esterno in un unico pezzo.
+
+I due file separati restano la fonte di verità. Rigenera questo consolidato con:
+
+```bash
+{ head -10 Progetto_completo.md.txt; cat readme.md; echo; echo "---"; echo; cat ROADMAP.md; } > /tmp/pc.md && mv /tmp/pc.md Progetto_completo.md.txt
+```
+
 # 🔮 PredictA - Pronostici Serie A
 
 Dashboard predittiva per partite di Serie A basata su modelli statistici e quote dei bookmaker.
-
-Questo file unisce `readme.md` (documentazione utente) e `ROADMAP.md` (piano tecnico di sviluppo) in un unico documento di riferimento. I due file separati restano quelli aggiornati automaticamente; questo è un consolidato manuale.
 
 ---
 
@@ -15,7 +23,7 @@ Questo file unisce `readme.md` (documentazione utente) e `ROADMAP.md` (piano tec
 - **Over/Under** 1.5 e 2.5 con gauge visivo
 - **Forma recente** visualizzata con pallini 🟢🟡🔴
 - **Scontri diretti** con tabella degli ultimi precedenti
-- **Quote bookmaker** integrate nel modello (Bet365, Pinnacle)
+- **Quote bookmaker** integrate nel modello (consenso multi-bookmaker, quota di chiusura quando disponibile)
 - **Slider interattivi** per regolare i pesi del modello
 
 ### Backtesting
@@ -23,6 +31,7 @@ Questo file unisce `readme.md` (documentazione utente) e `ROADMAP.md` (piano tec
 - **Metriche**: Accuratezza 1X2, F1 Score, RPS e Log-loss (calibrazione delle probabilità, non solo la previsione più probabile), Matrice di Confusione, breakdown per stagione
 - **Confronto tra configurazioni**: solo storico, storico+forma, vecchi default, solo quote, ottimale validato
 - **Iperparametri Dixon-Coles regolabili**: emivita delle statistiche storiche e correzione tau per i pareggi
+- **Selettori** per metodo di conversione delle quote (Shin / proporzionale) e fonte delle quote (chiusura / apertura)
 
 ---
 
@@ -35,41 +44,67 @@ Il sistema combina **quattro componenti** con pesi regolabili:
 | **Media storica** | Gol fatti/subiti, pesati con decadimento temporale (le partite recenti contano di più) | 0% |
 | **Forma recente** | Performance nelle ultime N partite | 10% |
 | **Scontri diretti** | Precedenti tra le due squadre | 0% |
-| **Quote bookmaker** | Saggezza del mercato (consenso multi-bookmaker, Bet365/Pinnacle a seguire) | 90% |
+| **Quote bookmaker** | Saggezza del mercato (consenso multi-bookmaker, quota di chiusura) | 90% |
 
-I pesi di default sono il risultato di una grid search su backtest walk-forward, **validata su tre stagioni indipendenti** (2023, 2024, 2025) e non solo su quella usata per cercarli. Il risultato più sorprendente: né lo storico pesato nel tempo né gli scontri diretti aggiungono valore misurabile una volta pesate bene le quote (probabilmente perché il mercato incorpora già efficientemente quell'informazione); un piccolo peso alla forma recentissima invece aiuta in modo consistente. Restano comunque slider liberi se vuoi sperimentare altre combinazioni.
+I pesi di default sono il risultato di una grid search su backtest walk-forward, **validata su tre stagioni indipendenti** (2023, 2024, 2025) e non solo su quella usata per cercarli — vedi la sezione Risultati sotto per i dettagli. Il risultato più sorprendente: né lo storico pesato nel tempo né gli scontri diretti aggiungono valore misurabile una volta pesate bene le quote (probabilmente perché il mercato incorpora già efficientemente quell'informazione); un piccolo peso alla forma recentissima invece aiuta in modo consistente. Restano comunque slider liberi se vuoi sperimentare altre combinazioni.
 
 ### Algoritmo
 1. **Calcolo xG**: forza attacco/difesa di ogni squadra relativa alla media di campionato (stile Poisson classico), combinata pesando storico, forma e scontri diretti
 2. **Vantaggio casa**: incorporato direttamente nelle formule (medie gol casa/trasferta separate), non come correzione aggiuntiva
 3. **Decadimento temporale**: le statistiche storiche pesano ogni partita con un decadimento esponenziale (emivita configurabile, default 730 giorni) invece di una media semplice su 33 stagioni
 4. **Distribuzione esatta dei punteggi**: calcolo diretto della matrice di probabilità Poisson (non più simulazione Monte Carlo), con la **correzione tau di Dixon & Coles (1997)** per i punteggi bassi — un Poisson indipendente puro sottostima sistematicamente i pareggi
-5. **Blend quote**: le probabilità finali fondono il modello statistico con le probabilità implicite delle quote
+5. **Conversione delle quote in probabilità**: **correzione di Shin (1992/1993)** invece della normalizzazione proporzionale `1/quota`, che ripartisce il margine del bookmaker in modo non uniforme tra gli esiti (corregge la *favorite-longshot bias*)
+6. **Medie di lega pesate nel tempo**: la media gol di campionato usata come normalizzatore ha lo stesso decadimento delle statistiche di squadra, invece di essere una media semplice su 33 stagioni (correggeva un bias pro-casa del ~15% sul rapporto degli xG)
+7. **Fonte delle quote**: **quota di chiusura** (a ridosso del fischio d'inizio, incorpora più informazione di mercato dell'apertura) quando disponibile — copertura dal 2019 in poi, con fallback automatico sull'apertura
+8. **Blend quote**: le probabilità finali fondono il modello statistico con le probabilità implicite delle quote
 
 ---
 
 ## 📊 Risultati Backtesting
 
-Validati su **tre stagioni di test indipendenti** (2023, 2024, 2025), ognuna con le stagioni precedenti come training — non solo sull'unica stagione su cui è girata la grid search, per escludere che i pesi scelti fossero semplicemente rumore statistico:
+Validati su **tre stagioni di test indipendenti** (2023, 2024, 2025), ognuna con le stagioni precedenti come training — non solo sull'unica stagione su cui è girata la grid search, per escludere che i pesi scelti fossero semplicemente rumore statistico. Tutte le configurazioni sotto usano gli stessi pesi ottimali (forma=0.10, scontri=0, quote=0.90) salvo dove indicato:
 
-| Configurazione | Acc. 2025 | Acc. 2024 | Acc. 2023 | **Media** |
-|---|---|---|---|---|
-| Solo storico (pesato nel tempo) | 43-46%* | - | - | ~44% |
-| Solo mercato (quote) | 54.4% | 52.6% | 54.7% | 53.9% |
-| Vecchio default (forma=0.5, scontri=0.15, quote=0.15) | 50.3% | - | - | ~50% |
-| Default precedente (forma=0, scontri=0.15, quote=0.85) | 54.1% | 53.4% | 52.9% | 53.5% |
-| **Nuovo default (forma=0.10, scontri=0, quote=0.90)** | **56.2%** | **53.7%** | **54.7%** | **54.9%** |
+| Configurazione | Acc. 2025 | Acc. 2024 | Acc. 2023 | **Media** | RPS medio |
+|---|---|---|---|---|---|
+| Solo storico (pesato nel tempo) | 43-46%* | - | - | ~44% | - |
+| Vecchio default (forma=0.5, scontri=0.15, quote=0.15) | 50.3% | - | - | ~50% | - |
+| Default pre-Fase 1 (forma=0, scontri=0.15, quote=0.85) | 54.1% | 53.4% | 52.9% | 53.5% | - |
+| Solo mercato (quote, nessun modello) | 54.4% | 52.6% | 54.7% | 53.9% | - |
+| Fine Fase 1 (apertura, conversione proporzionale) | 56.2% | 53.7% | 54.7% | 54.9% | 0.1889 |
+| + correzione di Shin | 55.9% | 53.7% | 54.7% | 54.8% | 0.1886 |
+| Shin + quote di chiusura | 55.4% | 54.7% | 55.5% | 55.2% | 0.1885 |
+| **Default attuale (+ medie di lega pesate)** | **55.4%** | **54.5%** | **55.3%** | **55.1%** | **0.1884** |
 
 *\*Numero di riferimento dalla validazione iniziale su una sola stagione, prima dell'introduzione del decadimento temporale.*
 
-*Benchmark "predici sempre 1" sul test 2025: 38.9%. Oltre all'accuratezza, il backtesting misura anche RPS e log-loss: sulla configurazione ottimale, RPS medio ≈ 0.188 sulle tre stagioni (più basso è meglio; una previsione uniforme dà circa 0.28, una perfetta dà 0). Usa il bottone **🔬 Confronta configurazioni** nella pagina di Backtesting per riprodurre questi numeri con i tuoi dati.*
+*Benchmark "predici sempre 1" sul test 2025: 38.9%. Oltre all'accuratezza, il backtesting misura anche RPS e log-loss (calibrazione delle probabilità): più basso è meglio; una previsione uniforme dà circa 0.28, una perfetta dà 0. Usa il bottone **🔬 Confronta configurazioni** nella pagina di Backtesting per riprodurre questi numeri con i tuoi dati.*
+
+### ⚠️ Quanto sono affidabili questi numeri
+
+Poco, ed è la cosa più importante da sapere prima di leggerli. Ripetendo il confronto su **7 stagioni** (2019-2025, 2.659 partite — l'intera finestra coperta dalle quote di chiusura) invece che su 3, e verificando la significatività statistica con il test appropriato per confronti sugli stessi match:
+
+| Confronto | Δ accuratezza | McNemar | Verdetto |
+|---|---:|---:|---|
+| Modello completo vs solo mercato | +0.34 pp | p = 0.28 | **non distinguibile dal rumore** |
+| Quote di chiusura vs apertura | +0.38 pp | p = 0.25 | non distinguibile dal rumore |
+
+**Il modello non batte il mercato in modo misurabile.** Il vantaggio dichiarato in passato (~1 punto percentuale su 3 stagioni) si dimezza allargando il campione a 7 — la firma tipica di un risultato dovuto al caso. Sull'RPS il modello è anzi leggermente peggiore del solo mercato.
+
+Il motivo tecnico: fra due configurazioni cambia previsione solo il ~2% delle partite, quindi l'accuratezza su 380 partite a stagione non ha abbastanza potenza statistica per distinguere differenze di questa dimensione. Il dettaglio, il calcolo di potenza e le conseguenze metodologiche sono in [ROADMAP.md](ROADMAP.md); lo script che lo verifica è `valida_significativita.py`.
+
+Questo non invalida il progetto: un mercato di scommesse liquido su un campionato importante *dovrebbe* essere difficile da battere, e misurarlo onestamente è un risultato in sé.
 
 **Cosa abbiamo imparato costruendo questi numeri (in ordine cronologico di scoperta):**
 1. Il calcolo della "forma recente" usava quasi solo le partite in trasferta invece delle ultime N in ordine cronologico — bug corretto.
 2. Le formule storico/forma pesavano ogni statistica come media semplice con la media di campionato, azzerando le differenze reali tra squadre e facendo collassare il modello su "vince sempre la casa" — corretto usando una forza attacco/difesa relativa alla media di lega (stile Poisson classico).
 3. **Il dataset conteneva un bug serio**: `stagioni/2010.txt` era una copia esatta di `stagioni/2009.txt` — la stagione 2009/10 era contata due volte e la 2010/11 mancava del tutto. Corretto sostituendo il file con i dati reali della stagione mancante.
 4. Con `peso_quote` alto, storico+forma+scontri non venivano rinormalizzati a sommare 1 tra loro: l'xG stimato collassava verso 0 (es. 0.24 gol attesi invece di ~1.6) perché le "quote" non entrano nel calcolo dell'xG ma nel blend finale delle probabilità — bug corretto.
-5. Con tutti i bug corretti e il modello validato su tre stagioni indipendenti: **né lo storico né gli scontri diretti aggiungono valore misurabile sopra le sole quote di mercato**; solo un peso piccolo (10%) alla forma recentissima aiuta in modo consistente. Il vantaggio del modello completo sopra il solo mercato è reale ma modesto: **circa 1 punto percentuale di accuratezza media**, misurato onestamente su dati mai visti dalla fase di ricerca dei pesi.
+5. Con tutti i bug corretti e il modello validato su tre stagioni indipendenti: **né lo storico né gli scontri diretti aggiungono valore misurabile sopra le sole quote di mercato**; solo un peso piccolo (10%) alla forma recentissima aiuta in modo consistente.
+6. **Dopo 12 esperimenti tra Fase 2 e Fase 3, il pattern è netto**: aggiungere *feature nuove* non funziona quasi mai (Elo, gradient boosting, tiri/corner, giorni di riposo, indice motivazionale, modello Bayesiano gerarchico: tutti negativi); funziona invece *estrarre meglio l'informazione già contenuta nelle quote* (Shin e quota di chiusura, gli unici due miglioramenti adottati).
+7. **Una revisione del codice ha poi trovato sei bug**, il più grave dei quali nella dashboard: le quote degli scontri diretti non venivano orientate rispetto a chi giocava in casa, quindi la probabilità di vittoria della squadra di casa era mescolata con quella dell'avversaria — su Milan–Inter, 0.41 invece di 0.27 su una componente pesata al 90%. Corretti tutti, con test di regressione. Dettaglio in [ROADMAP.md](ROADMAP.md).
+8. **La lezione finale è metodologica**: verificando la significatività statistica, *nessuno* dei risultati di Fase 2 e 3 — né i positivi né i negativi — era distinguibile dal rumore. Il collo di bottiglia non era il modello, era il campione su cui lo misuravamo.
+
+Il dettaglio di ogni esperimento — con numeri, causa probabile del fallimento e codice di validazione — è in **[ROADMAP.md](ROADMAP.md)**.
 
 ---
 
@@ -79,10 +114,10 @@ Validati su **tre stagioni di test indipendenti** (2023, 2024, 2025), ognuna con
 - **Streamlit** - Dashboard interattiva
 - **Pandas** - Manipolazione dati
 - **NumPy** - Calcoli numerici
-- **SciPy** - Distribuzione di Poisson per il modello Dixon-Coles
+- **SciPy** - Distribuzione di Poisson (Dixon-Coles), ricerca della radice per Shin, test binomiale per McNemar
 - **Plotly** - Grafici interattivi
-- **Scikit-learn** - Metriche di validazione e prototipo gradient boosting
-- **Requests** - Download storico Elo da clubelo.com
+- **Scikit-learn** - Metriche di validazione, regressione di Poisson per Elo, prototipi gradient boosting
+- **Requests** - Download dello storico Elo da clubelo.com e delle altre leghe da football-data.co.uk
 - **Pytest** - Test automatici sul modello (vedi `tests/`)
 
 ---
@@ -91,28 +126,43 @@ Validati su **tre stagioni di test indipendenti** (2023, 2024, 2025), ognuna con
 
 ```
 PredictA/
-├── app.py                         # Dashboard principale
-├── modello.py                     # Modulo condiviso: Dixon-Coles, decadimento temporale, RPS, Elo
-├── unisci_dati.py                 # Script per unire i CSV stagionali (Date, Stagione, quota di consenso)
-├── scarica_elo.py                 # Scarica lo storico Elo delle squadre da clubelo.com
-├── prototipo_gradient_boosting.py # Prototipo sperimentale (risultato: non batte il modello statistico)
-├── test_dati.py                   # Script di ispezione rapida di un file stagione
-├── serie_a.csv                    # Dataset completo (11.534 partite)
-├── elo_storico.csv                # Storico Elo delle 53 squadre (output di scarica_elo.py)
-├── requirements.txt                # Dipendenze Python pinnate
+├── app.py                                  # Dashboard principale
+├── modello.py                              # Modulo condiviso: Dixon-Coles, decadimento temporale, Shin, RPS, Elo
+├── unisci_dati.py                          # Unisce i CSV stagionali (Date, Stagione, quote apertura e chiusura)
+├── scarica_elo.py                          # Scarica lo storico Elo delle squadre da clubelo.com
+├── scarica_altre_leghe.py                  # Scarica Premier/Liga/Bundesliga/Ligue 1 (prototipo multi-lega)
+├── test_dati.py                            # Script di ispezione rapida di un file stagione
+├── serie_a.csv                             # Dataset completo (11.534 partite)
+├── elo_storico.csv                         # Storico Elo delle 53 squadre (output di scarica_elo.py, gitignored)
+├── requirements.txt                        # Dipendenze Python pinnate
+│
 ├── pages/
-│   └── backtesting.py             # Pagina di validazione (walk-forward multi-stagione)
+│   └── backtesting.py                      # Pagina di validazione (walk-forward multi-stagione)
+│
 ├── tests/
 │   ├── conftest.py
-│   └── test_model.py               # Test automatici su forma, scontri diretti, pesi, Elo
-├── stagioni/                      # File .txt delle singole stagioni
-│   ├── 1993.txt
-│   ├── 1994.txt
-│   └── ...
-├── venv/                          # Ambiente virtuale Python
-├── readme.md                      # Documentazione utente
-└── ROADMAP.md                     # Piano tecnico dettagliato Fase 2/3
+│   └── test_model.py                       # Test automatici su forma, scontri diretti, pesi, Elo, Shin, integrità dati
+│
+├── stagioni/                               # File .txt delle singole stagioni (1993 → 2025)
+├── altre_leghe/                            # Storico delle altre 4 leghe (gitignored)
+├── archive/                                # Dataset xG Understat da Kaggle (gitignored, ~21MB)
+│
+├── valida_shin.py                          # Validazione: correzione di Shin (adottata)
+├── valida_quote_chiusura.py                # Validazione: quote di chiusura (adottata)
+├── valida_medie_lega.py                    # Validazione: medie di lega pesate nel tempo (adottata)
+├── valida_pesi_medie_pesate.py             # Grid search dei pesi con le medie pesate
+├── valida_significativita.py               # Test di significativita' (McNemar + bootstrap RPS)
+├── valida_understat.py                     # Validazione: xG reali di Understat (non adottata)
+├── prototipo_gradient_boosting.py          # Prototipo ML (+ flag --con-tiri, --con-riposo, --con-motivazione)
+├── prototipo_gradient_boosting_multiliga.py# Prototipo ML con training multi-campionato
+├── prototipo_bayesiano_gerarchico.py       # Prototipo: stima MAP del modello di Baio & Blangiardo
+├── prototipo_ensemble_stacking.py          # Prototipo: meta-learner out-of-fold
+│
+├── readme.md                               # Questo file
+└── ROADMAP.md                              # Piano tecnico dettagliato Fase 2/3 e registro degli esperimenti
 ```
+
+Gli script `valida_*.py` e `prototipo_*.py` non fanno parte del percorso di produzione: sono il registro riproducibile degli esperimenti descritti in [ROADMAP.md](ROADMAP.md), tenuti in repo perché rieseguibili.
 
 ---
 
@@ -126,8 +176,8 @@ PredictA/
 
 ```bash
 # 1. Clona o crea la cartella del progetto
-mkdir serie-a-dashboard
-cd serie-a-dashboard
+mkdir predicta
+cd predicta
 
 # 2. Crea ambiente virtuale
 python -m venv venv
@@ -171,9 +221,26 @@ streamlit run app.py
 
 ### Backtesting
 1. Clicca su **Backtesting** nella sidebar di Streamlit
-2. Scegli quante stagioni recenti usare come test (walk-forward: quelle precedenti sono training), imposta i pesi del modello e gli iperparametri Dixon-Coles (emivita, rho)
+2. Scegli quante stagioni recenti usare come test (walk-forward: quelle precedenti sono training), imposta i pesi del modello, gli iperparametri Dixon-Coles (emivita, rho), il metodo di conversione delle quote e la fonte delle quote
 3. Clicca **🚀 Esegui Backtesting** per validare i pesi scelti, oppure **🔬 Confronta configurazioni** per vedere fianco a fianco solo storico / storico+forma / vecchi default / solo quote / ottimale
 4. Visualizza accuratezza, RPS, log-loss, matrice di confusione, metriche per classe e (se selezioni più stagioni) l'accuratezza stagione per stagione
+
+---
+
+## 📈 Prossimi Sviluppi
+
+Fase 1, Fase 2 e Fase 3 della roadmap sono **chiuse**: 15 voci testate, 3 adottate in produzione (correzione di Shin, quote di chiusura, medie di lega pesate nel tempo).
+
+La lezione operativa è che **le feature nuove non pagano, mentre estrarre meglio l'informazione dalle quote sì** — ma con l'avvertenza pesante della sezione sull'affidabilità sopra: nessuna di queste differenze è statisticamente distinguibile. Da qui l'ordine dei prossimi passi:
+
+- [ ] **Protocollo di misura** (priorità 0, prerequisito per tutto il resto): RPS con intervallo di confidenza bootstrap come criterio primario, finestra di test a 7 stagioni invece di 3, McNemar sull'accuratezza. Nessun dato nuovo richiesto
+- [ ] **Rivalutare ensemble stacking e multi-campionato** col protocollo nuovo: erano stati bocciati sull'accuratezza, che non aveva la potenza per bocciarli, mentre sull'RPS erano avanti
+- [ ] **Movimento apertura→chiusura e dispersione tra bookmaker** come feature separate (non come sostituzione della quota): l'unica idea rimasta che segue la stessa logica dei miglioramenti adottati
+- [ ] **pi-ratings** (Constantinou & Fenton): l'unico sistema di rating continuo mai provato — Elo è stato testato ed è risultato negativo
+- [ ] **Valore di mercato Transfermarkt** come variazione temporale (slope 30/90/180gg), non come feature statica
+- [ ] **Fonte xG aggiornabile**: il segnale di Understat è debolmente positivo ma il dataset disponibile si ferma a settembre 2024
+
+Il piano dettagliato (fonti dati specifiche, letteratura accademica, tecniche di modellazione, errori comuni da evitare, e il registro completo degli esperimenti falliti con la causa probabile) è in **[ROADMAP.md](ROADMAP.md)**.
 
 ---
 
@@ -191,13 +258,144 @@ La dashboard principale permette di scegliere **qualsiasi coppia di squadre** pr
 - **Periodo**: 1993 - 2026 (stagione 2025/26 in corso)
 - **Partite**: 11.534, tutte le 33 stagioni presenti senza duplicati né buchi (verificato: nessuna partita duplicata, nessuna stagione mancante tra la prima e l'ultima — controllo automatico in `tests/test_model.py`)
 - **Squadre**: 53
-- **Colonne**: Date, HomeTeam, AwayTeam, FTHG, FTAG, FTR, Stagione, OddsAvgH/D/A (quota di consenso multi-bookmaker), B365H/D/A, PSH/D/A, oltre a tiri/corner/cartellini quando disponibili (non ancora usati dal modello di produzione)
+- **Colonne**: Date, HomeTeam, AwayTeam, FTHG, FTAG, FTR, Stagione, `OddsAvgH/D/A` (quota di consenso multi-bookmaker in apertura), `OddsAvgCH/CD/CA` (quota di consenso in chiusura, 2.660 partite dal 2019), B365H/D/A, PSH/D/A, oltre a tiri/corner/cartellini quando disponibili (testati e non usati dal modello di produzione)
 
 ---
 
-## 🗺️ Roadmap Tecnica
+## 👨‍💻 Sviluppato con
+- Python
+- Streamlit
+- Claude
 
-### Fase 1 — Completata ✅
+---
+
+# 🗺️ Roadmap tecnica di PredictA
+
+Questo documento raccoglie l'analisi strategica completa su dati, feature e tecniche di modellazione per migliorare PredictA, con le fonti specifiche, la letteratura di riferimento e un piano di implementazione in fasi. Il `readme.md` principale resta snello per chi vuole solo installare e usare l'app; qui c'è il dettaglio per chi vuole continuare a svilupparla — incluso il **registro completo degli esperimenti falliti**, con i numeri e la causa probabile: sapere cosa non funziona e perché vale quanto sapere cosa funziona.
+
+---
+
+## 📍 Stato attuale (aggiornato al 25 luglio 2026)
+
+**Fasi 1, 2 e 3 chiuse.** 15 voci testate in totale, **2 adottate in produzione**.
+
+### Configurazione di produzione
+
+Pesi: `forma=0.10`, `scontri=0`, `quote=0.90` (quindi `storico=0` per costruzione). Quote di **chiusura** convertite con la correzione di **Shin**, medie di lega **pesate nel tempo**. Dixon-Coles con emivita 730 giorni e correzione tau.
+
+**55.02% di accuratezza / 0.1909 RPS** su 7 stagioni di test (2019-2025, 2.659 partite), contro **54.68% / 0.1904** del solo mercato.
+
+> ⚠️ **Quella differenza non è statisticamente significativa** (McNemar p = 0.28; sull'RPS il modello è anzi leggermente peggiore). Il progetto ha a lungo dichiarato "~1 punto percentuale sopra il mercato" sulla base di 3 stagioni: allargando a 7 il vantaggio si dimezza, il che indica che era in buona parte rumore. Vedi la sezione "problema di misura" più sotto — è la conclusione più importante di tutto il lavoro fatto finora.
+
+### Registro completo degli esperimenti
+
+Tutti validati con lo stesso protocollo: 3 stagioni di test indipendenti (2023, 2024, 2025), walk-forward, nessun dato futuro. Ordinati per esito.
+
+| # | Esperimento | Fase | Acc. media | RPS | Esito |
+|---|---|---|---:|---:|---|
+| — | *Solo mercato (benchmark)* | — | 53.90% | — | *riferimento* |
+| — | *Fine Fase 1 (apertura, proporzionale)* | 1 | 54.87% | 0.1889 | *riferimento* |
+| 1 | **Correzione di Shin** | 2 | 54.79% | **0.1886** | ✅ **adottato** — RPS meglio in 3/3 stagioni, costo zero |
+| 2 | **Quote di chiusura** | 2 | **55.22%** | **0.1885** | ✅ **adottato** — +0.43 pp, il risultato più forte |
+| 3 | Rating Elo (clubelo.com) | 2 | 54.79% | — | ❌ nessuna combinazione batte il default |
+| 4 | Gradient boosting | 2 | 54.17% | 0.1896 | ❌ sotto il modello statistico |
+| 5 | + tiri in porta / corner | 2 | 54.00% | 0.1898 | ❌ peggiora anche il gradient boosting |
+| 6 | + giorni di riposo / congestione | 2 | 54.17% | 0.1893 | ❌ nessun beneficio misurabile |
+| 7 | xG reali di Understat | 2 | 53.87%¹ | 0.1919¹ | ⚠️ debolmente positivo, **non adottabile** (fonte ferma a set. 2024) |
+| 8 | Tendenza dell'arbitro | 2 | — | — | ❌ scartato: `Referee` copre 2 stagioni su 33 |
+| 9 | Modello Bayesiano gerarchico | 3 | 54.35% | 0.1883 | ❌ peggiore in accuratezza |
+| 10 | Ensemble stacking | 3 | 54.35% | **0.1880** | ⚠️ misto, non adottato (miglior RPS assoluto) |
+| 11 | Training multi-campionato | 3 | 54.08% | 0.1884 | ⚠️ RPS meglio in 3/3, accuratezza neutra, non adottato |
+| 12 | Indice motivazionale fine stagione | 3 | 53.91% | 0.1897 | ❌ negativo e coerente in 3/3 stagioni |
+| 13 | Formazioni/infortuni (API-Football) | 3 | — | — | ⛔ valutato, non implementato (a pagamento) |
+
+*¹ Understat è validato su 2021/2022/2023 e non sulle 3 stagioni standard, per limiti di copertura del dataset: il confronto onesto è contro 53.43%/0.1928 dello stesso modello ricalcolato su quella finestra, non contro i numeri di questa tabella.*
+
+### La lezione: cosa funziona e cosa no
+
+Il pattern è netto e coerente su 12 esperimenti misurati:
+
+> **Aggiungere feature nuove non paga. Estrarre meglio l'informazione già contenuta nelle quote sì.**
+
+Gli unici due miglioramenti adottati (Shin, quote di chiusura) non introducono **nessun dato nuovo**: cambiano solo come si converte in probabilità un'informazione che avevamo già. Tutto ciò che porta segnale esterno — Elo, xG, tiri, riposo, motivazione, multi-lega, rosa — o non batte il mercato, o lo batte solo sulla calibrazione (RPS) e non sull'accuratezza.
+
+La spiegazione più probabile è la stessa in tutti i casi: **il mercato incorpora già quell'informazione**, e in modo più efficiente di quanto possiamo fare noi con medie sui gol.
+
+Con una precisazione importante aggiunta dopo la verifica di significatività: **anche i due "successi" non sono statisticamente distinguibili dal rumore.** Shin e quote di chiusura restano adottati — sono gratuiti, teoricamente fondati e vanno nella direzione giusta su entrambe le metriche — ma vanno descritti come "coerenti con l'attesa", non come miglioramenti misurati.
+
+Una nota secondaria ma ricorrente: **RPS e accuratezza si muovono spesso in direzioni opposte**. Ensemble stacking (0.1880) e multi-campionato (0.1884) hanno il miglior RPS mai misurato ma un'accuratezza sotto il modello statistico. Il criterio usato all'epoca era "guadagno pulito o quasi su entrambe le metriche" — da qui l'esclusione di entrambi. Alla luce dell'analisi di potenza quel criterio era sbagliato: l'accuratezza non aveva abbastanza potenza per bocciarli, mentre l'RPS li dava avanti. **Sono i due esperimenti che meritano di più una rivalutazione col protocollo nuovo.**
+
+### Correzioni di bug (25 luglio 2026)
+
+Una revisione del codice di produzione ha trovato sei difetti, tutti verificati empiricamente e corretti. Nessuno era coperto dai test esistenti; ora lo sono tutti.
+
+| # | Difetto | File | Impatto misurato |
+|---|---|---|---|
+| 1 | **Quote degli scontri diretti non orientate casa/trasferta**: le colonne `Odds*H`/`Odds*A` si riferiscono alla squadra di casa *di quella riga*, non a quella per cui si sta prevedendo | `app.py` | Su Milan–Inter: `p_1` 0.406 invece di 0.270, `p_2` 0.350 invece di 0.485. ~14 punti percentuali di errore su una componente pesata 0.90. Appiattiva ogni previsione verso la parità e cancellava il vantaggio campo |
+| 2 | **Vincolo di validità di Dixon-Coles non imposto** (`rho >= -1/lambda`) | `modello.py` | Con `rho=-0.30` e xG ≥ 3.34 la cella 0-1 diventava negativa (−0.00054): probabilità negative mascherate dalla normalizzazione. xG oltre 3.34 è raggiungibile col default, dove l'xG viene interamente dalla forma |
+| 3 | **Medie di lega su 33 stagioni contro statistiche decadute a 2 anni** | `app.py`, `pages/backtesting.py` | Bias pro-casa del ~15% sul rapporto degli xG. Vedi la voce dedicata sotto |
+| 4 | **Fallback delle quote di chiusura dichiarato ma non implementato**: `"OddsAvgCH" in riga.index` è sempre vero, è un nome di colonna | `pages/backtesting.py` | Le 8.874 partite pre-2019 perdevano le quote del tutto e cadevano sul modello storico (~44%) invece di ricadere sull'apertura. Fuori dalla portata della UI, ma raggiungibile dagli script |
+| 5 | **Finestra forma 5 nella dashboard, 3 validata nel backtest** | `app.py` | Con `peso_storico = 0` per costruzione, è l'unico iperparametro che determina l'xG mostrato: la dashboard non girava sulla configurazione validata |
+| 6 | **Dashboard e backtest usano quote di natura diversa** | `app.py` | Il backtest legge la quota della partita da prevedere, la dashboard la media dei precedenti. Inerente al fatto che la dashboard è una simulazione ipotetica, ma va detto: il 55.22% validato non descrive ciò che la dashboard calcola |
+
+### Medie di lega pesate nel tempo — testato, positivo sul modello puro, neutro in produzione
+
+Le formule dell'xG rapportano la forza di una squadra alla media di campionato, ma le statistiche di squadra decadono con emivita 730 giorni (descrivono gli ultimi 2-4 anni) mentre la media di lega era una media semplice su ~30 stagioni. Su questo dataset: 1.5135/1.1433 gol casa/trasferta su tutto lo storico contro 1.3932/1.2121 dal 2021. Semplificando algebricamente, `media_gol_casa` sparisce dalla formula dell'xG di casa e resta solo il divisore `media_gol_trasferta`, più basso del 6% del dovuto; simmetricamente l'xG di trasferta è sgonfiato dell'8%. **Il rapporto fra i due è distorto di circa il 15% a favore della casa su ogni partita** — la stessa modalità di errore già corretta una volta in Fase 1.
+
+Validato con `valida_medie_lega.py` sul protocollo standard a 3 stagioni:
+
+| Configurazione | Medie storiche | Medie pesate | Δ |
+|---|---:|---:|---|
+| Modello statistico puro (`peso_quote=0`) | 48.55% / 0.2067 | **49.96% / 0.2003** | **+1.41 pp**, coerente in 3/3 |
+| Previsioni "1" (misura del bias pro-casa) | 76.9% | **72.2%** | il bias si riduce come previsto |
+| Blend di produzione (`peso_quote=0.90`) | 55.22% / 0.1885 | 55.05% / 0.1884 | dentro il rumore |
+
+La correzione migliora nettamente il modello statistico da solo, ma il guadagno **non si propaga al blend**: con il 90% del peso sul mercato, il 10% residuo non lo trasporta. Una grid search rifatta con le medie pesate (`valida_pesi_medie_pesate.py`) non trova un ottimo migliore di quello attuale (il massimo è 55.14% con forma=0.20/quote=0.80, contro 55.22% attuale).
+
+**Adottato come default** (in `app.py` e nella sidebar del backtesting, dove resta selezionabile "storiche" per confronto). Il criterio è quello del progetto applicato con la metrica giusta: sull'accuratezza le due versioni sono indistinguibili (appena **4 partite discordanti su 2.659**), mentre sull'RPS — l'unica metrica con abbastanza potenza a questo campione, vedi sotto — la versione pesata è migliore in modo **statisticamente significativo** su 7 stagioni. Ed è la formulazione corretta a prescindere.
+
+### ⚠️ Il problema di misura: nessun risultato di Fase 2 e 3 è statisticamente distinguibile
+
+Questo è il risultato più importante emerso finora, e riguarda **tutte** le conclusioni del progetto, positive e negative.
+
+Tutti gli esperimenti sono stati giudicati su differenze di accuratezza fra 0.1 e 0.9 punti percentuali. `valida_significativita.py` verifica se quelle differenze siano distinguibili dal rumore, con il test appropriato per confronti sugli stessi match (McNemar sulle predizioni discordanti, più bootstrap appaiato sull'RPS) — cioè il confronto **più favorevole possibile** alle differenze osservate, perché le due configurazioni sbagliano in gran parte le stesse partite.
+
+Misurato su **7 stagioni** (2019-2025, 2.659 partite: l'intera finestra coperta dalle quote di chiusura, più del doppio del protocollo storico a 3 stagioni):
+
+| Confronto | Δ accuratezza | Discordanti | McNemar | Δ RPS (IC95%) | Verdetto |
+|---|---:|---:|---:|---|---|
+| Quote chiusura vs apertura (*"il risultato più forte finora"*) | +0.38 pp | 62 / 2659 | p = 0.25 | −0.00054 [−0.00126, +0.00020] | non distinguibile |
+| Medie pesate vs storiche | −0.15 pp | 4 / 2659 | p = 0.13 | **−0.00011 [−0.00021, −0.00002]** | **distinguibile su RPS** |
+| **Modello (forma+quote) vs solo mercato** | **+0.34 pp** | **55 / 2659** | **p = 0.28** | **+0.00053 [−0.00007, +0.00113]** | **non distinguibile** |
+
+Due osservazioni pesanti:
+
+1. **Il modello non batte il mercato in modo misurabile.** Sull'accuratezza il vantaggio non è significativo; sull'RPS il modello è anzi leggermente *peggiore* del solo mercato. E il vantaggio **si dimezza allargando il campione**: +0.79 pp su 3 stagioni, +0.34 pp su 7. È la firma tipica di un risultato dovuto al caso — le 3 stagioni su cui i pesi sono stati cercati erano semplicemente favorevoli.
+2. **L'accuratezza non ha abbastanza potenza per questo problema.** Solo il 2% delle partite cambia previsione fra due configurazioni: tutto il resto del campione non porta informazione sulla differenza. L'RPS usa invece ogni partita, ed è infatti l'unica metrica che ha prodotto un verdetto significativo.
+
+**Conseguenza: l'affermazione centrale del progetto — "il modello batte il mercato di ~1 punto percentuale" — non è supportata dai dati.** Non è dimostrata falsa: è indistinguibile dal rumore, e si assottiglia quando il campione cresce. Simmetricamente, lo stesso vale per i risultati negativi: Elo, gradient boosting, indice motivazionale e gli altri sono stati scartati su differenze altrettanto piccole, che con quel campione non erano misurabili **in nessuna direzione**.
+
+**Implicazione metodologica per il futuro**: usare l'RPS con intervallo di confidenza bootstrap come criterio primario e l'accuratezza solo come metrica descrittiva; usare la finestra a 7 stagioni invece che 3 (nessun dato nuovo necessario); e dichiarare esplicitamente "non distinguibile" invece di "leggermente meglio/peggio" quando è il caso. Diversi esperimenti archiviati come negativi meriterebbero di essere rivalutati con questo protocollo.
+
+### Cosa resta aperto
+
+**La priorità 0 non è una feature: è il protocollo di misura.** Finché ogni esperimento produce differenze indistinguibili dal rumore, aggiungere feature significa scegliere a caso quali tenere. Le voci 1-4 hanno senso solo dopo la 0.
+
+| Priorità | Voce | Perché | Riferimento |
+|---|---|---|---|
+| **0** | **Protocollo di misura: RPS con IC bootstrap come criterio primario, finestra di test a 7 stagioni, McNemar sull'accuratezza** | Nessun dato nuovo, nessun modello nuovo. È il prerequisito perché qualunque altro esperimento sia interpretabile. Include la rivalutazione degli esperimenti già archiviati come negativi | Sezione "problema di misura" sopra |
+| **1** | **Movimento apertura→chiusura e dispersione tra bookmaker** come feature separate | L'unica idea rimasta che segue la logica dei due miglioramenti adottati: nessun dato nuovo, solo informazione già nel dataset estratta meglio. Il delta apertura→chiusura è letteratura nota come proxy di denaro informato | Fase 2, punto 6 (in coda) |
+| 2 | **pi-ratings** (Constantinou & Fenton) | L'unico sistema di rating continuo mai provato; nei paper supera Elo semplice sulla predizione 1X2 — ma Elo qui è risultato negativo, quindi l'aspettativa va tarata al ribasso | Tier 2 |
+| 3 | **Valore di mercato Transfermarkt** come slope temporale (30/90/180gg) e prior shrinked | Cattura cambi di rosa che le medie storiche vedono in ritardo. Da usare come variazione, non come feature statica | Fase 2, punto 5 |
+| 4 | **Fonte xG aggiornabile** | Il segnale Understat è debolmente positivo; serve una fonte che non si fermi a settembre 2024. Lo scarto xG − gol reali come proxy di regressione alla media resta l'idea più interessante | Fase 2, punto 4 |
+
+Una nota di realismo su tutte e quattro: il mercato delle scommesse su Serie A è liquido ed efficiente, e sette anni di dati dicono che il margine sfruttabile sopra la quota di chiusura, se esiste, è inferiore a mezzo punto percentuale. È un risultato in sé, non un fallimento — ed è coerente con la letteratura sull'efficienza dei mercati di scommesse.
+
+---
+
+## Fase 1 — Completata ✅
+
+Vedi la sezione "📊 Risultati Backtesting" nel [readme.md](readme.md) per i dettagli. In sintesi:
 
 - Correzione tau di Dixon & Coles (1997) per i punteggi bassi, al posto della simulazione Monte Carlo
 - Decadimento temporale esponenziale delle statistiche storiche (modulo `modello.py`)
@@ -206,95 +404,114 @@ La dashboard principale permette di scegliere **qualsiasi coppia di squadre** pr
 - Metriche RPS e log-loss nel backtesting, non solo accuratezza
 - Pesi di default validati su tre stagioni di test indipendenti (2023, 2024, 2025)
 
-**Risultato**: il modello batte il solo mercato di ~1 punto percentuale medio di accuratezza, in modo stabile su più stagioni. Un margine reale ma piccolo — le fasi successive partono da qui.
+Risultato: il modello batte il solo mercato di ~1 punto percentuale medio di accuratezza, in modo stabile su più stagioni. Un margine reale ma piccolo — le fasi successive partono da qui.
 
-### Dati e feature per le fasi successive
+---
 
-Organizzati per priorità (impatto atteso sull'accuratezza) e fattibilità (facilità di ottenere il dato).
+## Dati e feature per le fasi successive
 
-#### 🟢 Tier 1 — Alto impatto, bassa/media fatica
+Organizzati per priorità (impatto atteso sull'accuratezza) e fattibilità (facilità di ottenere il dato), con la fonte specifica e come entrerebbero nel modello.
 
-| Dato/Feature | Fonte specifica | Fattibilità | Impatto atteso | Come entra nel modello |
-|---|---|---|---|---|
-| **Rating Elo per club** | [clubelo.com](http://clubelo.com) — API REST gratuita | Molto alta | Testato: **negativo**, vedi Fase 2 | Sostituisce le medie storiche/forma, o input a ensemble |
-| **Expected Goals (xG) reali** | [understat.com](https://understat.com) (Serie A dal 2014/15) | Alta | Alto, non ancora testato | Sostituisce FTHG/FTAG come target per "attacco/difesa storico" |
-| **Quote di più bookmaker già scaricate** | Colonne già presenti nei file `stagioni/*.txt` | Molto alta | Medio | Deviazione standard tra bookmaker come feature di "incertezza del mercato" |
-| **Quote di chiusura** | `AvgCH/CD/CA` già nei file grezzi dal 2019 (7 stagioni), ora estratte in `unisci_dati.py` | Molto alta | Testato: **positivo, il più forte finora**, vedi Fase 2 | Sostituisce la quota di apertura come input al blend — adottato come default |
-| **Correzione di Shin per le quote** | Nessun dato nuovo — solo matematica su `OddsAvgH/D/A` | Molto alta | Testato: **positivo**, vedi Fase 2 | Sostituisce la normalizzazione proporzionale semplice (`1/quota`) prima del blend — adottato come default |
-| **RPS/log-loss per configurazione** | Già implementato | — | — | Criterio primario, non solo accuratezza |
-
-#### 🟡 Tier 2 — Impatto medio-alto, richiede una pipeline dati nuova
+### 🟢 Tier 1 — Alto impatto, bassa/media fatica
 
 | Dato/Feature | Fonte specifica | Fattibilità | Impatto atteso | Come entra nel modello |
 |---|---|---|---|---|
-| **Valore di mercato rosa** | [transfermarkt.com](https://www.transfermarkt.com) (scraping) o dataset Kaggle | Media | Medio-alto | Feature indipendente, o prior per il modello Bayesiano (Fase 3) |
-| **Statistiche avanzate (tiri, possesso, xT)** | [fbref.com](https://fbref.com) (Serie A dal 2017/18) — libreria `soccerdata` | Media-alta | Alto per partite recenti | Feature engineering (rolling average) |
-| **API-Football (formazioni, infortuni)** | [api-football.com](https://www.api-football.com) — tier gratuito limitato | Media | Alto per "match-day" | Aggiustamento xG su forza XI titolare atteso |
-| **Sistema di rating pi-ratings** | Constantinou & Fenton, paper pubblico | Media | Alto | Sostituisce "storico" con rating aggiornato partita per partita |
-| **Meteo storico allo stadio** | [open-meteo.com](https://open-meteo.com) (API gratuita) | Alta (serve mappatura stadio) | Basso-medio | Feature minore |
-| **Tiri/corner/cartellini già nel dataset** | Già estratti da `unisci_dati.py` | Molto alta | Testato: **negativo**, vedi Fase 2 | Feature nel prototipo gradient boosting |
-| **Giorni di riposo tra partite** | Colonna `Date`, già disponibile | Molto alta | Da validare | Proxy di fatica, non ancora implementato |
+| **Rating Elo per club** | [clubelo.com](http://clubelo.com) — API REST gratuita (`api.clubelo.com/{Team}` restituisce CSV storico giornaliero) | Molto alta: CSV pronto, nessuno scraping aggressivo | Atteso alto (Hvattum & Arntzen 2010) — **testato: negativo**, vedi Fase 2 punto 1 | Sostituisce le medie storiche/forma attuali come feature di forza attacco/difesa, o come input diretto a un layer di ensemble insieme alle quote |
+| **Expected Goals (xG) reali** | [understat.com](https://understat.com) (Serie A dal 2014/15, scraping HTML — dati in un tag `<script>` JSON) | Alta in teoria, **bassa in pratica**: scraping bloccato, usato dataset Kaggle fermo a set. 2024 | Atteso alto — **testato: debolmente positivo ma non adottabile**, vedi Fase 2 punto 4 | Sostituisce FTHG/FTAG come target per calcolare "attacco/difesa storico", oppure feature aggiuntiva in un modello XGBoost |
+| **Quote di più bookmaker già scaricate** | Colonne già presenti nei file `stagioni/*.txt` (WHH, BWH, PSH, ecc. — solo `OddsAvgH/D/A` consolidato è usato oggi) | Molto alta: dato già scaricato | Medio — **non ancora testato**, è la voce aperta a priorità più alta | Estendere la cascata di `unisci_dati.py` per calcolare anche una deviazione standard tra bookmaker, utile come feature di "incertezza del mercato" |
+| **Quote di chiusura** | Colonne `B365CH/CD/CA`, `AvgCH/CD/CA` già presenti nei file grezzi dal 2019 (7 stagioni) ma scartate da `unisci_dati.py`, che estraeva solo le quote "correnti" | Molto alta: dato già scaricato, verificato con valori diversi dalla quota non-chiusura | **Testato: positivo, il più forte finora** (+0.43 pp) — vedi Fase 2 punto 6, **adottato** | Colonne `OddsAvgCH/CD/CA` in `unisci_dati.py`; copertura solo 2019+, sufficiente per le 3 stagioni di validazione |
+| **Movimento apertura→chiusura e dispersione tra bookmaker** | Stesse colonne, ma usate come *differenza* invece che come sostituzione | Molto alta: dato già in `serie_a.csv` | Da validare — il differenziale apertura/chiusura è letteratura nota come segnale su informazione privata/movimenti di mercato | Feature aggiuntive (`odds_move_*`, `odds_dispersion`), non sostituzione della quota nel blend |
+| **Correzione di Shin per le quote** | Nessun dato nuovo — solo matematica su `OddsAvgH/D/A` | Molto alta | **Testato: positivo**, vedi Fase 2 punto 2, **adottato** | Sostituisce la normalizzazione proporzionale `1/quota` prima del blend |
+| **RPS/log-loss per configurazione** | Già implementato | — | — | Continuare a usarli come criterio primario invece della sola accuratezza quando si aggiungono nuove feature |
 
-#### 🔴 Tier 3 — Avanzato, alto sforzo o costo
+### 🟡 Tier 2 — Impatto medio-alto, richiede una pipeline dati nuova
 
 | Dato/Feature | Fonte specifica | Fattibilità | Impatto atteso | Come entra nel modello |
 |---|---|---|---|---|
-| **Modello Bayesiano gerarchico** (Baio & Blangiardo 2010) | `PyMC` non installabile qui, sostituito con MAP via scipy | Bassa | Testato: **negativo**, vedi Fase 3 | Sostituisce il layer statistico con partial pooling |
-| **Formazioni/infortuni in tempo reale** | API-Football a pagamento | Bassa-media | Alto solo "a ridosso" | Feature runtime, non backtestabile facilmente |
-| **Ensemble stacking** | Nessun dato esterno | Media | Alto | Meta-learner (regressione logistica) out-of-fold |
-| **Multi-campionato** | football-data.co.uk (altre leghe) | Alta come dato, media impatto | Testato: **positivo su RPS, neutro su accuratezza**, vedi Fase 3 | Righe di training aggiuntive per il gradient boosting, mai come test |
-| **Indice motivazionale fine stagione** | Nessun dato nuovo — ricostruzione classifica dai risultati | Media | Testato: **negativo**, vedi Fase 3 | Correzione xG nelle ultime giornate per squadre senza obiettivi |
-| **`Squad_Rotation_Index`, distanza di viaggio, turnover pre-coppe** | Richiedono formazioni/minutaggio, calendario coppe, geocoding | Bassa | Non verificato | Scartati per ora, vedi sezione dedicata sotto |
+| **Valore di mercato rosa** | [transfermarkt.com](https://www.transfermarkt.com) (scraping non ufficiale — pacchetti come `transfermarkt-scraper` su GitHub) o dataset Kaggle "Transfermarkt Football Data" | Media: nessuna API ufficiale | Medio-alto — Kuper & Szymanski (*Soccernomics*) mostrano correlazione ~0.9 tra monte ingaggi e posizione in classifica; cattura cambi di rosa che le medie storiche non vedono subito. **Non testato** | Feature indipendente in XGBoost, oppure prior per la forza attacco/difesa nel modello Bayesiano (Fase 3) |
+| **Statistiche avanzate (tiri, possesso, passaggi progressivi)** | [fbref.com](https://fbref.com) (dati StatsBomb via Sports Reference, Serie A dal 2017/18) — libreria Python `soccerdata` | Bassa in pratica: FBref risponde 403 in questo ambiente (verificato in Fase 2 punto 4) | Alto per partite recenti, ma copre solo da 2017/18 in poi. **Non testato** — i tiri già nel dataset sono però risultati negativi | Feature engineering per XGBoost (rolling average ultimi N tiri/xG/possesso) |
+| **API-Football (fixtures, formazioni, infortuni, quote)** | [api-football.com](https://www.api-football.com) — tier gratuito 100 richieste/giorno, a pagamento per storico/infortuni completi | Media: gratis limitato | Alto per un modello "match-day" — **valutato e non implementato**, vedi Fase 3 punto 4 | Aggiustamento moltiplicativo dell'xG basato su "forza XI titolare atteso" vs "forza rosa completa" |
+| **Sistema di rating pi-ratings** | Nessuna fonte esterna — solo implementazione (Constantinou & Fenton, *pi-football-ratings*, paper pubblico) | Media: formula pubblicata ma più complessa di Elo | Atteso alto (nei paper supera Elo semplice sulla predizione 1X2), ma **Elo qui è risultato negativo**: aspettativa da tarare al ribasso. Non testato | Sostituisce interamente la sezione "storico" con un rating che si aggiorna partita per partita |
+| **Meteo storico allo stadio** | [open-meteo.com](https://open-meteo.com) (API storica gratuita, no key richiesta) | Alta, ma serve mappare squadra→stadio→coordinate | Basso-medio — effetto reale ma piccolo su pioggia/vento e gol totali. **Non testato** | Feature minore in XGBoost |
+| **Shots/corner/cartellini già nel dataset** | Già estratti da `unisci_dati.py` (colonne HS, AS, HST, AST, HC, AC, HY, AY, HR, AR) | Molto alta: dato già presente in `serie_a.csv` | **Testato: negativo**, vedi Fase 2 punto 7 | Feature per un modello XGBoost, o media pesata nel tempo come proxy xG-like semplificato |
+| **Giorni di riposo / congestione di calendario** | Colonna `Date`, già disponibile | Molto alta | **Testato: negativo**, vedi Fase 2 punto 7 | Proxy di fatica come feature del gradient boosting |
 
-### Tecniche di modellazione: cosa adottare
+### 🔴 Tier 3 — Avanzato, alto sforzo o costo
 
-1. **Dixon-Coles completo** — fatto in Fase 1 (tau + decadimento temporale).
-2. **Rating system continuo (Elo o pi-ratings)** — Elo testato, risultato negativo (vedi Fase 2); pi-ratings non ancora provato.
-3. **XGBoost/LightGBM come sfidante, non sostituto** — testato (`HistGradientBoostingClassifier`, XGBoost non disponibile in questo ambiente), risultato negativo con i dati attuali.
-4. **Reti neurali: sconsigliate.** Con questo volume di dati la letteratura mostra alberi/ensemble e modelli Poisson competitivi o superiori.
-5. **Ensemble stacking** come step finale, solo dopo aver validato che ciascun componente aggiunge valore da solo.
+| Dato/Feature | Fonte specifica | Fattibilità | Impatto atteso | Come entra nel modello |
+|---|---|---|---|---|
+| **Modello Bayesiano gerarchico** (Baio & Blangiardo 2010) | Nessun dato esterno — `PyMC` non installabile (llvmlite), sostituito con MAP via scipy | Bassa | Testato: **negativo**, vedi Fase 3 | Sostituisce il layer statistico attuale: ogni squadra ha un parametro attacco/difesa con prior condiviso, che si restringe verso la media di lega in proporzione all'incertezza |
+| **Formazioni/infortuni in tempo reale** | API-Football piano a pagamento, o scraping Transfermarkt pagina infortuni | Bassa-media: dati storici affidabili difficili da reperire gratis | Alto ma solo per previsioni "a ridosso della partita" — **valutato e non implementato**, vedi Fase 3 punto 4 | Feature runtime, non backtestabile facilmente sullo storico per mancanza di dati infortuni retroattivi |
+| **Ensemble stacking** (Poisson-Dixon-Coles + Elo + XGBoost + quote) | Nessun dato esterno | Media: tecnica nota, serve disciplina per evitare leakage nel meta-learner | Atteso alto (Groll et al. 2019) — **testato: misto, non adottato**, vedi Fase 3 punto 2 | Meta-learner allenato out-of-fold sulle probabilità dei modelli base |
+| **Multi-campionato** | football-data.co.uk copre già Premier/Liga/Bundesliga/Ligue 1 con lo stesso formato | Alta come dato, media come impatto | **Testato: positivo su RPS, neutro su accuratezza, non adottato**, vedi Fase 3 punto 3 | Training set esteso per il gradient boosting, mai come test |
+| **Indice motivazionale di fine stagione** | Nessun dato nuovo — ricostruzione classifica dai risultati | Media | **Testato: negativo**, vedi Fase 3 punto 5 | Feature del gradient boosting: distanza dalle soglie salvezza/Europa |
+| **`Squad_Rotation_Index`, distanza di viaggio, turnover pre-coppe** | Richiedono formazioni/minutaggio, calendario coppe, geocoding | Bassa | Non verificato — dati non disponibili | Scartati, vedi "Cosa abbiamo scartato da revisioni esterne" |
 
-### Errori comuni da evitare
+---
+
+## Tecniche di modellazione: cosa adottare
+
+In ordine di ritorno sull'investimento:
+
+1. **Dixon-Coles completo** — ✅ fatto in Fase 1 (tau + decadimento temporale).
+2. **Rating system continuo (Elo o pi-ratings)** al posto delle medie storiche statiche — Elo **testato, negativo** (Fase 2 punto 1): cattura informazione che il mercato incorpora già. I pi-ratings restano l'unica variante non provata, ma il risultato di Elo consiglia di tarare al ribasso l'aspettativa.
+3. **XGBoost/LightGBM come sfidante, non sostituto** — **testato, negativo** (Fase 2 punto 3, con `HistGradientBoostingClassifier`: XGBoost richiede `libomp`, non disponibile in questo ambiente). Il rischio di overfitting con ~11.500 partite si è materializzato: 85% in training contro 48% in test con 5 stagioni. Nemmeno con forte regolarizzazione, feature aggiuntive o training multi-lega ha mai battuto il modello statistico in accuratezza.
+4. **Reti neurali: sconsigliate.** Con questo volume di dati la letteratura (Groll, Baboota & Kaur 2019) mostra alberi/ensemble e modelli Poisson competitivi o superiori alle reti profonde — e qui nemmeno gli alberi hanno funzionato.
+5. **Ensemble stacking** come step finale — **testato, misto** (Fase 3 punto 2): miglior RPS mai misurato (0.1880), ma accuratezza sotto il modello statistico. Non adottato per il rapporto complessità/beneficio.
+
+## Errori comuni da evitare
+
+Alcuni li abbiamo già commessi e corretti in questo progetto — inclusi qui perché facili da reintrodurre:
 
 - **Data leakage temporale**: usare indici sbagliati o concatenare train+test senza tagliare al punto giusto.
 - **Shrinkage eccessivo verso la media**: mediare ripetutamente ogni statistica con la media di lega annulla le differenze reali tra squadre.
 - **Ignorare la correlazione nei bassi punteggi**: un Poisson indipendente sottostima i pareggi (da cui la correzione tau).
-- **Ottimizzare i pesi su una sola stagione di test**: validare sempre su più stagioni indipendenti (lezione imparata in Fase 1: il punto di massimo grezzo della grid search non reggeva su una terza stagione).
-- **Trattare tutte le squadre allo stesso modo indipendentemente dal campione**: una neopromossa ha zero storia in A — serve shrinkage bayesiano, non un default arbitrario.
-- **Confondere "batte il benchmark ingenuo" con "batte il mercato"**: il vero test è battere le quote — riusciamo a farlo solo di ~1 punto percentuale.
-- **Usare solo l'accuratezza come metrica**: su un problema 3-classi sbilanciato, premia previsioni "decise" anche se mal calibrate — da qui RPS e log-loss.
-- **Scraping fragile senza fallback**: fonti come Understat/FBref/Transfermarkt cambiano struttura HTML senza preavviso — prevedere test automatici.
+- **Ottimizzare i pesi su una sola stagione di test**: rischio concreto di scegliere la combinazione "fortunata" per rumore — validare sempre su più stagioni indipendenti (lezione imparata in Fase 1: il punto di massimo grezzo della grid search non reggeva su una terza stagione).
+- **Trattare tutte le squadre allo stesso modo indipendentemente dal campione**: una neopromossa ha zero storia in A — serve shrinkage bayesiano proporzionale all'incertezza, non un default arbitrario.
+- **Confondere "batte il benchmark ingenuo" con "batte il mercato"**: il modello batte facilmente "sempre 1", ma il vero test è battere le quote — riusciamo a farlo solo di ~1 punto percentuale.
+- **Usare solo l'accuratezza come metrica**: su un problema 3-classi sbilanciato, l'accuratezza premia previsioni "decise" anche se mal calibrate — da qui RPS e log-loss già in uso.
+- **Scraping fragile senza fallback**: fonti come Understat/FBref/Transfermarkt cambiano struttura HTML senza preavviso — prevedere test automatici che verifichino lo schema atteso.
 
-### Fase 2 — Medio termine (settimane, nuova pipeline dati)
+---
 
-1. ~~Integrare Elo da clubelo.com~~ — **fatto, risultato negativo.** Storico Elo delle 53 squadre scaricato (`scarica_elo.py` → `elo_storico.csv`), lookup point-in-time in `modello.py` (`elo_asof_batch`), integrato come componente pesata in `pages/backtesting.py` e calibrato con una regressione di Poisson vera (`calibra_regressione_elo`, non una costante indovinata). Validato sulle stesse 3 stagioni indipendenti della Fase 1: **nessuna combinazione batte la configurazione attuale** (54.87% medio senza Elo vs 54.79% nella miglior combinazione con Elo). Codice tenuto e testato, `peso_elo` di default a 0. Probabile causa: ClubElo cattura informazione che il mercato incorpora già, stessa storia di storico/scontri diretti in Fase 1. **Nota deploy:** `elo_storico.csv` è gitignored (non presente su Streamlit Cloud): `pages/backtesting.py` carica Elo in modo tollerante alla sua assenza, disabilitando lo slider invece di far crashare la pagina.
-2. ~~Correzione di Shin per le quote (de-overrounding)~~ — **fatto, primo risultato positivo della Fase 2.** La quota di consenso veniva convertita in probabilità con `1/quota` normalizzato in proporzione (metodo "basic"), che non corregge la favorite-longshot bias. Implementata la formula chiusa di Shin (1992/1993, `probabilita_shin` in `modello.py`) come alternativa, integrata in `app.py` e `pages/backtesting.py`. Validata sulle stesse 3 stagioni indipendenti, pesi fissi alla configurazione ottimale (forma=0.10, scontri=0, quote=0.90): Shin migliora l'RPS in **tutte e 3** le stagioni (media 0.1886 contro 0.1889 proporzionale), accuratezza sostanzialmente invariata (54.79% contro 54.87%, differenza dentro il rumore). A differenza di Elo e gradient boosting non richiede dati nuovi né addestramento. Adottato come default (script di validazione: `valida_shin.py`).
-3. ~~Prototipo gradient boosting su feature strutturate~~ — **fatto, risultato negativo.** `prototipo_gradient_boosting.py`: `HistGradientBoostingClassifier` di scikit-learn (non XGBoost, che richiede la libreria di sistema `libomp` non disponibile in questo ambiente) allenato sulle stesse componenti già validate come feature. Con pochi dati di training (5 stagioni, ~1900 partite) overfit severo (85% accuratezza su training, 48% su test). Con 10 stagioni (~3800 partite) e forte regolarizzazione il divario si riduce ma il risultato resta **leggermente sotto** il modello statistico: 54.17% di accuratezza media e RPS 0.1896, contro 54.87%/0.1889 del modello attuale.
-4. ~~xG reali di Understat al posto dei gol grezzi~~ — **fatto, risultato cautamente positivo ma NON adottabile in produzione.** Scraping diretto bloccato (understat.com/fbref.com non praticabili in questo ambiente): usato un dataset Kaggle già raccolto (`archive/`, gitignored, ~21MB), coperture Serie A 2014-2023 complete ma 2024 parziale (si ferma a settembre 2024) e 2025 assente. Validato su 2021/2022/2023 (non le stagioni standard 2023/2024/2025, per limiti di copertura), ricalcolando anche il modello attuale sulla stessa finestra: xG Understat batte i gol reali in media (53.87%/0.1919 contro 53.43%/0.1928) ma con risultati incoerenti tra stagioni. Non integrato in produzione: il dataset si ferma a settembre 2024, quindi andrebbe in stallo esattamente per le partite più recenti da prevedere oggi.
+## Fase 2 — Completata ✅ (6 voci su 7 chiuse, 2 adottate)
+
+Esito in sintesi: **Shin** e **quote di chiusura** adottati in produzione; Elo, gradient boosting, tiri/corner, giorni di riposo e arbitro negativi; xG Understat positivo ma non adottabile per limiti della fonte. Resta aperto solo il punto 5 (Transfermarkt).
+
+
+1. ~~Integrare Elo da clubelo.com~~ — **fatto, risultato negativo.** Storico Elo delle 53 squadre scaricato (`scarica_elo.py` → `elo_storico.csv`), lookup point-in-time in `modello.py` (`elo_asof_batch`), integrato come componente pesata in `pages/backtesting.py` e calibrato con una regressione di Poisson vera (`calibra_regressione_elo`, non una costante indovinata). Validato sulle stesse 3 stagioni indipendenti della Fase 1: **nessuna combinazione batte la configurazione attuale** (54.87% medio senza Elo vs 54.79% nella miglior combinazione con Elo). Codice tenuto e testato (`tests/test_model.py`), `peso_elo` di default a 0. Probabile causa: ClubElo cattura informazione che il mercato incorpora già, stessa storia di storico/scontri diretti in Fase 1. **Nota deploy:** `elo_storico.csv` è gitignored (non presente su Streamlit Cloud), quindi `pages/backtesting.py` carica Elo in modo tollerante all'assenza del file (`ELO_DISPONIBILE`): se manca, lo slider Elo si disabilita invece di far crashare l'intera pagina.
+2. ~~Correzione di Shin per le quote (de-overrounding)~~ — **fatto, primo risultato positivo della Fase 2.** La quota di consenso veniva convertita in probabilità con `1/quota` normalizzato in proporzione (metodo "basic"), che non corregge la favorite-longshot bias (i bookmaker mettono più margine sulle quote alte che su quelle basse). Implementata la formula chiusa di Shin (1992/1993, `probabilita_shin` in `modello.py`, derivazione di Štrumbelj 2014) come alternativa, integrata in `pages/backtesting.py` (selettore "Metodo conversione quote") e in `app.py`. Validata con lo stesso protocollo a 3 stagioni indipendenti usato per Elo e gradient boosting, pesi fissi alla configurazione già ottimale (forma=0.10, scontri=0, quote=0.90): Shin migliora l'RPS in **tutte e 3** le stagioni (media 0.1886 contro 0.1889 proporzionale), con accuratezza sostanzialmente invariata (54.79% contro 54.87%, -0.08 punti percentuali in media, spiegato da poche partite quasi in parità nella sola stagione 2025 — non un vero peggioramento). A differenza di Elo e gradient boosting, non richiede dati nuovi né addestramento: cambia solo come si toglie il margine dalle quote già in uso. Adottato come default in `app.py` e in `pages/backtesting.py` (resta selezionabile il metodo proporzionale per confronto). Script di validazione: `valida_shin.py`.
+3. ~~Prototipo gradient boosting su feature strutturate~~ — **fatto, risultato negativo.** `prototipo_gradient_boosting.py`: `HistGradientBoostingClassifier` di scikit-learn (non XGBoost, che richiede la libreria di sistema `libomp` non disponibile in questo ambiente) allenato sulle stesse componenti già validate (xG storico/forma/scontri diretti, Elo, probabilità implicite delle quote) come feature. Con pochi dati di training (5 stagioni, ~1900 partite) overfit severo (85% accuratezza su training, 48% su test). Con 10 stagioni (~3800 partite) e forte regolarizzazione (early stopping, `l2_regularization`) il divario si riduce ma il risultato resta **leggermente sotto** il modello statistico su tutte e 3 le stagioni indipendenti: 54.17% di accuratezza media e RPS 0.1896, contro 54.87%/0.1889 del modello attuale. Causa probabile: dati Serie A troppo limitati (~380 partite/stagione) perché un modello ad alberi trovi interazioni non lineari utili oltre a quelle già catturate dal blend statistico calibrato.
+4. ~~xG reali di Understat al posto dei gol grezzi~~ — **fatto, risultato cautamente positivo ma NON adottabile in produzione.** Lo scraping diretto di understat.com e fbref.com è risultato bloccato in questo ambiente (Understat non incorpora più i dati nell'HTML per richieste non-browser, FBref risponde 403): usato invece un dataset già raccolto (Kaggle, `codytipton/understat-data`, scaricato manualmente dall'utente in `archive/`, gitignored per dimensione ~21MB). Il dataset non ha un id di partita condiviso tra le due squadre (una riga per squadra per partita, senza nome avversario): le partite sono ricostruite abbinando ogni riga alla lista ufficiale di `serie_a.csv` per (squadra, data). Copertura Serie A: stagioni 2014-2023 complete, 2024 parziale (59 partite, l'esportazione Kaggle si ferma a fine settembre 2024), 2025 assente — le 3 stagioni di test standard (2023/2024/2025) non sono quindi utilizzabili. Validato invece su 2021/2022/2023 (`valida_understat.py`), sostituendo storico/forma calcolati sui gol reali con la stessa media pesata nel tempo calcolata sull'xG di Understat, **ricalcolando anche il modello attuale sulla stessa finestra** per un confronto onesto (il riferimento 54.87%/0.1889 è su 2023-2025, non comparabile qui): xG Understat batte i gol reali in media (53.87% acc / 0.1919 RPS contro 53.43%/0.1928), ma con risultati incoerenti tra stagioni (2021: +2.1 punti percentuali; 2022: pari; 2023: -0.8 punti percentuali) — un segnale reale ma debole, non un miglioramento netto come Shin o le quote di chiusura. **Non integrato in `app.py`/`pages/backtesting.py`**: anche accettando il segnale, il dataset disponibile si ferma a settembre 2024, quindi la feature andrebbe in stallo esattamente per le partite più recenti che l'app deve prevedere oggi — servirebbe una fonte aggiornabile (scraping funzionante o un abbonamento a un'API a pagamento) prima di poterlo usare in produzione. Lo scarto xG − gol reali come segnale di "regressione alla media" resta un'idea da provare se in futuro si risolve il problema della fonte dati.
 5. Scraping valore di mercato Transfermarkt come proxy di qualità rosa aggiornata — usarlo come **variazione temporale** (slope 30/90/180gg) e come prior "shrinked" per un modello gerarchico, non come feature statica diretta (raffinamento da una revisione esterna).
-6. ~~Quote di chiusura~~ — **fatto, secondo risultato positivo della Fase 2 (il più forte finora).** `AvgCH/CD/CA` erano già nei file grezzi dal 2019 ma scartate da `unisci_dati.py`; ora estratte con la stessa logica delle quote di apertura (7 stagioni coperte su 33). Validato sulle stesse 3 stagioni indipendenti (copertura piena), pesi fissi alla configurazione ottimale con Shin: la chiusura batte l'apertura in 2 stagioni su 3, con **accuratezza media +0.43 punti percentuali** (55.22% contro 54.79%) e RPS leggermente migliore. A differenza di Shin, migliora anche l'accuratezza pura. Adottato come default in `app.py` e `pages/backtesting.py`. Il movimento apertura→chiusura e la dispersione tra bookmaker come feature separate restano da testare.
+6. ~~Quote di chiusura~~ — **fatto, secondo risultato positivo della Fase 2 (il più forte finora).** `B365CH/CD/CA` e `AvgCH/CD/CA` erano già nei file grezzi dal 2019 ma scartati da `unisci_dati.py`; ora estratte con la stessa logica a cascata delle quote di apertura (`OddsAvgCH/CD/CA` in `serie_a.csv`, 2.660 partite coperte su 11.534, cioè le 7 stagioni dal 2019). Validato con lo stesso protocollo a 3 stagioni indipendenti (tutte con copertura piena, 2019+), pesi fissi alla configurazione ottimale e metodo Shin già adottato: la quota di chiusura (a ridosso del fischio d'inizio, incorpora più informazione di mercato dell'apertura) batte l'apertura in 2 stagioni su 3 (2024: 53.68%→54.74%; 2023: 54.74%→55.53%; 2025: lieve calo 55.94%→55.41%), con **accuratezza media +0.43 punti percentuali** (55.22% contro 54.79%) e RPS leggermente migliore (0.1885 contro 0.1886). A differenza di Shin, migliora anche l'accuratezza pura, non solo la calibrazione. Adottato come default in `app.py` (con fallback per-partita su apertura per gli scontri diretti pre-2019) e in `pages/backtesting.py` (selettore "Fonte quote"). Script di validazione: `valida_quote_chiusura.py`. Il **movimento apertura→chiusura** e la **dispersione tra bookmaker** come feature separate (segnale di informazione privata / incertezza di mercato, non sostituzione della quota) restano da testare, probabilmente via il prototipo gradient boosting.
 7. Feature "quasi gratis" da dati già presenti, nessuno scraping nuovo:
-   - ~~Tiri in porta/corner/cartellini~~ — **fatto, risultato negativo.** `prototipo_gradient_boosting.py --con-tiri` aggiunge le medie recenti al prototipo gradient boosting. Risultato misto tra stagioni (2025 migliora, 2024 peggiora, 2023 stabile), in media **leggermente peggio**: 54.00% di accuratezza e RPS 0.1898, contro 54.17%/0.1896 senza tiri e 54.87%/0.1889 del modello statistico.
-   - ~~Giorni di riposo, congestione di calendario, trasferta dopo trasferta~~ — **fatto, risultato negativo.** `prototipo_gradient_boosting.py --con-riposo`. Validato: 54.17% di accuratezza media e RPS 0.1893, sostanzialmente identico al gradient boosting senza queste feature e sotto il modello statistico (54.87%/0.1889). Nessun beneficio misurabile.
-   - ~~Tendenza dell'arbitro~~ — **scartato, verificato.** La colonna `Referee` copre solo 2 stagioni su 33. Confermato indipendentemente da una seconda revisione.
-   - `Squad_Rotation_Index`, distanza di viaggio, infortuni/XI atteso in forma probabilistica: richiedono dati che non abbiamo — restano Tier 3.
+   - ~~Tiri in porta/corner/cartellini~~ — **fatto, risultato negativo.** `prototipo_gradient_boosting.py --con-tiri` aggiunge le medie recenti (tiri in porta, corner) al prototipo gradient boosting. Risultato misto tra stagioni (2025: 54.4%→55.4%, migliora; 2024: 54.2%→52.6%, peggiora; 2023: stabile), ma in media **leggermente peggio** del gradient boosting senza queste feature: 54.00% di accuratezza e RPS 0.1898, contro 54.17%/0.1896 senza tiri e 54.87%/0.1889 del modello statistico. Nessun beneficio netto, coerente col tema di questa fase: più feature non aiutano se il volume dati resta lo stesso.
+   - ~~Giorni di riposo, congestione di calendario, trasferta dopo trasferta~~ — **fatto, risultato negativo.** `prototipo_gradient_boosting.py --con-riposo` aggiunge giorni dall'ultima partita, numero di partite negli ultimi 14 giorni e se la partita precedente della squadra era in trasferta (elaborazione da una revisione esterna; scartato `partita_di_coppa_in_5_giorni` perché richiederebbe il calendario delle coppe europee, dato che non abbiamo). Validato sulle stesse 3 stagioni indipendenti: 54.17% di accuratezza media e RPS 0.1893, sostanzialmente identico al gradient boosting senza queste feature (54.17%/0.1896) e sotto il modello statistico (54.87%/0.1889). Nessun beneficio: il calendario di Serie A (turni settimanali regolari, poche squadre impegnate in coppe europee) probabilmente non genera abbastanza variazione di riposo da essere un segnale utile oltre a quanto già catturato dalle quote.
+   - ~~Tendenza dell'arbitro (falli/rigori/cartellini)~~ — **scartato, verificato.** La colonna `Referee` è presente nei file grezzi solo per le stagioni 2005 e 2006 (2 su 33), poi mai più: dato insufficiente per costruire una feature storica utilizzabile su tutto il periodo di test. Confermato da una seconda revisione esterna, che infatti raccomanda la stessa cautela.
+   - `Squad_Rotation_Index`, distanza di viaggio, infortuni/XI atteso in forma probabilistica: richiedono dati che non abbiamo (formazioni/minutaggio, geocoding stadi, rating giocatori) — restano Tier 3, non "quasi gratis" come proposto da alcune revisioni esterne.
 
-### Fase 3 — Avanzato (mesi)
+## Fase 3 — Completata ✅ (5 voci su 5 chiuse, 0 adottate)
 
-1. ~~Modello Bayesiano gerarchico (Baio & Blangiardo) con partial pooling~~ — **fatto, risultato negativo.** `PyMC` non installabile (llvmlite non compila su Python 3.14 qui): sostituito con stima MAP equivalente via massima verosimiglianza penalizzata (`prototipo_bayesiano_gerarchico.py`), stesso effetto di shrinkage verso la media di lega per le squadre con pochi dati, ri-adattato ogni ~10 partite. Validato sulle 3 stagioni indipendenti: 54.35% acc / 0.1883 RPS, contro 55.22%/0.1885 della stessa configurazione con storico/forma da gol reali — peggiore in accuratezza. Causa probabile: il refit periodico con forte regolarizzazione si muove troppo lentamente per catturare la "forma recente" che la media mobile attuale cattura bene.
-2. ~~Ensemble stacking finale~~ (Poisson-Dixon-Coles + gradient boosting, meta-learner allenato out-of-fold) — **fatto, risultato misto, non adottato.** `prototipo_ensemble_stacking.py`: meta-learner ad alberi (HistGradientBoosting) su predizioni out-of-fold del modello statistico e del gradient boosting, che realizza da solo il "blend condizionato al contesto" suggerito da una revisione esterna. Validato: RPS migliore di entrambi i modelli base (0.1880 contro 0.1889/0.1896), ma accuratezza sotto il modello statistico puro (54.35% contro 54.87%). Non adottato: il compromesso è ambiguo e il costo di mantenere due modelli aggiuntivi in produzione non è giustificato da un beneficio cosi' modesto.
-3. ~~Estensione multi-campionato~~ — **fatto, risultato positivo sulla calibrazione, neutro sull'accuratezza.** Storico di Premier League/Liga/Bundesliga/Ligue 1 (`scarica_altre_leghe.py`) usato come training aggiuntivo per il gradient boosting (mai come test, sempre e solo Serie A), feature calcolate per-lega walk-forward. Validato: RPS migliore in tutte e 3 le stagioni (0.1884 contro 0.1896 solo Serie A, meglio anche del modello statistico 0.1889), accuratezza sostanzialmente invariata (54.08% contro 54.17%, entrambe sotto il modello statistico 54.87%). Non adottato: il gradient boosting non supera comunque il modello statistico in accuratezza.
-4. **Formazioni/infortuni via API-Football** — *valutato, non implementato per scelta.* Richiede un piano a pagamento e la condizione posta da questa voce (cambio di scopo verso "previsione a ridosso del match reale") non si e' verificata: PredictA resta una dashboard esplorativa.
-5. ~~Indice motivazionale di fine stagione~~ (proposto indipendentemente da due revisioni esterne) — **fatto, risultato negativo.** `prototipo_gradient_boosting.py --con-motivazione`: distanza dalla soglia salvezza (17°) e Europa (6°) calcolata con classifica ricostruita walk-forward. Validato sulle 3 stagioni indipendenti: 53.91% acc / 0.1897 RPS, sotto sia il gradient boosting senza questa feature (54.17%/0.1896) sia il modello statistico (54.87%/0.1889), coerente in tutte e 3 le stagioni. Probabile causa: partite genuinamente "senza obiettivi" troppo poche per stagione perché il modello impari un pattern affidabile.
+Esito in sintesi: **nessuna delle cinque voci è stata adottata**. Bayesiano gerarchico e indice motivazionale negativi; ensemble stacking e multi-campionato migliorano l'RPS ma non l'accuratezza; API-Football valutato e non implementato per scelta. È la fase che ha prodotto la lezione centrale del progetto — vedi "📍 Stato attuale" in cima.
+
+
+1. ~~Modello Bayesiano gerarchico (Baio & Blangiardo) con partial pooling~~ — **fatto, risultato negativo.** `pip install pymc` fallisce in questo ambiente: `llvmlite` (dipendenza di `numba`, il motore JIT di PyMC) non ha ancora una wheel precompilata per Python 3.14 e non compila da sorgente (stessa natura del problema `libomp`/XGBoost in Fase 2). Sostituito con una stima puntuale equivalente (`prototipo_bayesiano_gerarchico.py`): massima verosimiglianza penalizzata (Poisson, log-link, vantaggio-casa comune, penalità L2 su attacco/difesa per squadra), che corrisponde matematicamente alla moda a posteriori (MAP) dello stesso modello gerarchico con prior Normali — stesso effetto di partial pooling per le squadre con pochi dati, ma solo la stima puntuale, senza l'incertezza a posteriori completa che darebbe l'MCMC. Ri-adattato ogni ~10 partite (walk-forward). **Scoperta metodologica importante nel percorso**: ai pesi ottimali già validati (forma=0.10, quote=0.90, che sommano esattamente a 1) il peso della sola componente "storico" nel blend è 0 per costruzione (`peso_storico = 1 - pf - ps - pe - pq` in `valuta_componente`), quindi sostituire solo lo storico è un no-op indipendentemente dal suo valore; il test corretto sostituisce sia storico sia forma con la stessa stima gerarchica. Validato sulle 3 stagioni indipendenti: 54.35% di accuratezza media e RPS 0.1883, contro 55.22%/0.1885 sostituendo solo con lo storico/forma da gol reali (stessa configurazione Shin+chiusura) — **peggiore in accuratezza**, RPS sostanzialmente invariato. Probabile causa: il refit periodico (ogni ~10 partite) con forte regolarizzazione produce una stima di forza squadra che si muove lentamente nel tempo, perdendo il segnale di "forma recente" (ultime 3 partite) che la media mobile attuale cattura e che si è già dimostrato utile da solo.
+2. ~~Ensemble stacking finale~~ (Poisson-Dixon-Coles + gradient boosting, meta-learner allenato out-of-fold) — **fatto, risultato misto, non adottato.** `prototipo_ensemble_stacking.py`: le probabilità del modello statistico (storico+forma+quote di chiusura con Shin) e del prototipo gradient boosting (Fase 2, punto 3) vengono combinate da un secondo `HistGradientBoostingClassifier` poco profondo usato come meta-learner, allenato su predizioni **out-of-fold** (5-fold CV sul training set, mai sulle stesse righe usate per allenare i modelli di base, altrimenti il meta-learner vedrebbe predizioni "facili" e il beneficio sarebbe sovrastimato). Il meta-learner ad alberi realizza di per se' il "blend condizionato al contesto" suggerito da una revisione esterna (impara da solo quando fidarsi di più dell'uno o dell'altro dalle 6 probabilità di input), senza bisogno di specificare a mano quali segnali di mismatch usare. Elo non incluso (già negativo, vedi Fase 2). Validato sulle 3 stagioni indipendenti: RPS leggermente migliore di entrambi i modelli di base (0.1880 contro 0.1889 statistico e 0.1896 gradient boosting), ma **accuratezza sotto il modello statistico puro** (54.35% contro 54.87%, sebbene sopra il gradient boosting da solo, 54.17%). A differenza di Shin e delle quote di chiusura (guadagno pulito su entrambe le metriche o quasi), qui il compromesso è ambiguo: un piccolo guadagno di calibrazione a fronte di una perdita di accuratezza più marcata, con in più il costo di mantenere in produzione due modelli aggiuntivi (gradient boosting + meta-learner, entrambi da ri-allenare periodicamente) per un beneficio modesto. **Non adottato in produzione**: il rapporto complessità/beneficio non lo giustifica, soprattutto perché il gradient boosting alla base non ha mai battuto il modello statistico in nessun test di questa fase.
+3. ~~Estensione multi-campionato~~ per aumentare il volume dati della componente ML — **fatto, risultato positivo sulla calibrazione, neutro sull'accuratezza.** `scarica_altre_leghe.py` scarica lo storico di Premier League, Liga, Bundesliga e Ligue 1 da football-data.co.uk (stessa fonte e formato di `stagioni/*.txt`, cartella `altre_leghe/` gitignored); `prototipo_gradient_boosting_multiliga.py` calcola le componenti (storico/forma/scontri/quote, senza Elo) walk-forward per ciascuna lega separatamente (le medie gol si confrontano solo all'interno della stessa lega) e le usa come righe di training AGGIUNTIVE per il gradient boosting, mai come test (il test resta sempre e solo Serie A). Per tenere il tempo di calcolo gestibile, lo storico passato a `stats_pesate_squadre`/`calcola_forma_bt` è troncato a una finestra scorrevole (altrimenti il costo cresce quadraticamente con le partite totali della lega) e ogni lega è limitata alle ultime ~6.000 partite (~15-16 stagioni). Validato sulle 3 stagioni indipendenti (~22.400 partite aggiuntive nel pool, training totale 26.200 righe contro 3.799 di sola Serie A): l'RPS migliora in **tutte e 3** le stagioni (media 0.1884 contro 0.1896 solo Serie A — meglio persino del modello statistico, 0.1889), confermando che il volume dati era un fattore limitante per la calibrazione del gradient boosting; l'accuratezza resta sostanzialmente invariata (54.08% contro 54.17%, differenza dentro il rumore, entrambe comunque sotto il modello statistico, 54.87%). **Non adottato in produzione**: anche col miglioramento, il gradient boosting non supera il modello statistico in accuratezza, e mantenere una pipeline di 4 leghe aggiuntive (download, parsing, ricalcolo walk-forward) non è giustificato per un guadagno che resta comunque inferiore al modello statistico già in uso.
+4. **Formazioni/infortuni via API-Football** — *valutato, non implementato per scelta.* Richiede un piano a pagamento per uno storico affidabile, e la condizione posta da questa stessa voce ("solo se il caso d'uso si sposta da dashboard esplorativa a previsione a ridosso del match reale") non si è verificata: PredictA resta una dashboard esplorativa. Non implementato per non impegnare una spesa ricorrente senza un cambio di scopo del progetto che la giustifichi.
+5. ~~Indice motivazionale di fine stagione~~ (proposto indipendentemente da due revisioni esterne) — **fatto, risultato negativo.** `prototipo_gradient_boosting.py --con-motivazione` ricostruisce la classifica punto-per-punto in modo walk-forward (`costruisci_classifiche_progressive`, nessun dato futuro) e calcola per ogni partita la distanza di ciascuna squadra dalla soglia salvezza (17° posto) e dalla soglia Europa (6° posto), oltre alle partite giocate in stagione, come feature aggiuntive del prototipo gradient boosting. Validato sulle 3 stagioni indipendenti: 53.91% di accuratezza media e RPS 0.1897, **sotto** sia il gradient boosting senza questa feature (54.17%/0.1896) sia il modello statistico (54.87%/0.1889), coerente in tutte e 3 le stagioni (nessuna in controtendenza). Probabile causa: le partite genuinamente "senza obiettivi" nelle ultime giornate sono poche per stagione (tipicamente una manciata di squadre di centroclassifica sicura), un volume insufficiente perché il modello impari un pattern affidabile oltre al rumore.
 
 ### Cosa abbiamo scartato da revisioni esterne, e perché
 
 Tre revisioni esterne (Deepseek, Gemini, Perplexity) hanno proposto integrazioni aggiuntive. Tenuto quanto sopra (Shin, quote di chiusura, giorni di riposo elaborati, indice motivazionale, blend condizionato); scartato:
-- **Feature legate all'arbitro**: una revisione affermava che il dato fosse "già presente nei CSV di Football-Data" — verificato e smentito, la colonna `Referee` copre solo 2 stagioni su 33. Confermato indipendentemente da una seconda revisione.
-- **`Squad_Rotation_Index`, distanza di viaggio, turnover pre-Champions, infortuni/XI atteso in forma probabilistica**: richiedono dati che non abbiamo, nonostante fossero proposti come "quasi gratis" — restano Tier 3.
-- **Pannello di "value betting"** (soglia EV+ e alert, o "watchlist di sottovalutazione" con linguaggio più prudente): scartato per scelta di merito, non tecnica, indipendentemente da come viene presentato. Il progetto ha un disclaimer esplicito (scopo dimostrativo, non invito al gioco d'azzardo) ed è coerente non costruire strumenti che segnalano attivamente scommesse da piazzare. La correzione di Shin resta comunque utile per la calibrazione interna del modello, indipendentemente dall'uso per scommettere.
+- **Feature legate all'arbitro**: una revisione affermava che il dato fosse "già presente nei CSV di Football-Data" — verificato e smentito, la colonna `Referee` copre solo 2 stagioni su 33. Una seconda revisione, indipendentemente, raccomandava la stessa cautela.
+- **`Squad_Rotation_Index`, distanza di viaggio, turnover pre-Champions, infortuni/XI atteso in forma probabilistica**: richiedono dati che non abbiamo (formazioni/minutaggio, calendario coppe europee, geocoding stadi, rating giocatori) nonostante fossero proposti come "quasi gratis" o "fattibilità alta" — restano Tier 3.
+- **Pannello di "value betting"** (con soglia di EV+ e alert, o proposto come "watchlist di sottovalutazione" con linguaggio più prudente): scartato per scelta di merito, non tecnica, indipendentemente da come viene presentato nell'interfaccia. Il progetto ha un disclaimer esplicito (scopo dimostrativo, non invito al gioco d'azzardo) ed è coerente non costruire strumenti che segnalano attivamente scommesse da piazzare. La correzione di Shin resta comunque utile come miglioramento della calibrazione interna del modello, indipendentemente dall'uso per scommettere.
 
-### Letteratura e riferimenti
+---
+
+## Letteratura e riferimenti
 
 - Dixon, M.J. & Coles, S.G. (1997), *Modelling Association Football Scores and Inefficiencies in the Betting Market* — il modello base implementato in Fase 1.
 - Rue, H. & Salvesen, Ø. (2000) — modello Bayesiano dinamico con forza attacco/difesa che varia nel tempo.
@@ -304,11 +521,4 @@ Tre revisioni esterne (Deepseek, Gemini, Perplexity) hanno proposto integrazioni
 - Hvattum, L.M. & Arntzen, H. (2010) — valutazione dei rating Elo applicati al calcio.
 - Groll, A., Ley, C., Schauberger, G., Van Eetvelde, H. (2019) — modelli ibridi statistico+ML per le previsioni calcistiche.
 - Metodologia pubblica SPI (Soccer Power Index) di FiveThirtyEight — combina Elo con differenziale reti aggiustato e valori di mercato.
-- Shin, H.S. (1992, 1993) — modello per stimare il margine del bookmaker in modo non uniforme tra gli esiti ("favorite-longshot bias").
-
----
-
-## 👨‍💻 Sviluppato con
-- Python
-- Streamlit
-- Claude Sonnet 5
+- Shin, H.S. (1992, 1993) — modello per stimare il margine del bookmaker in modo non uniforme tra gli esiti ("favorite-longshot bias"), alternativa più accurata alla normalizzazione proporzionale semplice di `1/quota`.

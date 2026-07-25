@@ -99,6 +99,33 @@ def media_pesata_per_squadra(df, colonna_gruppo, colonna_valore, colonna_data, d
     return (agg["_somma_pesata"] / agg["_somma_pesi"]).rename(colonna_valore)
 
 
+def medie_lega_pesate(df, data_riferimento, half_life_giorni):
+    """Media gol casa/trasferta di CAMPIONATO con lo stesso decadimento temporale
+    usato per le statistiche di squadra.
+
+    Serve perché le formule dell'xG rapportano la forza di una squadra alla media
+    di lega: se le statistiche di squadra decadono con emivita 730 giorni (quindi
+    descrivono di fatto gli ultimi 2-4 anni) ma la media di lega è calcolata su
+    tutte le 33 stagioni, si stanno confrontando due epoche diverse.
+
+    Su questo dataset la differenza non è trascurabile: 1.5135/1.1433 gol
+    casa/trasferta su tutto lo storico contro 1.3932/1.2121 dal 2021 in poi. Nella
+    formula xG_casa = attacco_casa * difesa_trasferta / media_gol_trasferta (dove
+    media_gol_casa si semplifica algebricamente) il divisore risulta più basso del
+    6%, gonfiando ogni xG di casa; simmetricamente l'xG di trasferta è sgonfiato
+    dell'8%. Il rapporto fra i due è distorto di circa il 15% a favore della casa
+    su ogni partita.
+
+    Restituisce (media_gol_casa, media_gol_trasferta)."""
+    giorni = (data_riferimento - df["Date"]).dt.days.to_numpy()
+    pesi = peso_esponenziale(giorni, half_life_giorni)
+    somma_pesi = pesi.sum()
+    if somma_pesi <= 0:
+        return float(df["FTHG"].mean()), float(df["FTAG"].mean())
+    return (float((df["FTHG"].to_numpy() * pesi).sum() / somma_pesi),
+            float((df["FTAG"].to_numpy() * pesi).sum() / somma_pesi))
+
+
 def stats_pesate_squadre(df, data_riferimento, half_life_giorni):
     """Tabella attacco/difesa casa e trasferta per ogni squadra, pesata con
     decadimento temporale esponenziale rispetto a data_riferimento (2 groupby
@@ -165,9 +192,30 @@ def probabilita_shin(quote):
     return (p / p.sum()).tolist()
 
 
+def rho_ammissibile(lam, mu, rho):
+    """Vincola rho alla regione in cui la correzione tau di Dixon-Coles produce
+    fattori non negativi. Il paper originale definisce tau solo per
+        max(-1/lam, -1/mu) <= rho <= min(1/(lam*mu), 1)
+    ma il vincolo è facile da violare senza accorgersene: fuori da quella regione
+    tau(0,1) = 1 + lam*rho (o tau(1,0) = 1 + mu*rho) diventa negativo e la cella
+    corrispondente della matrice dei punteggi assume una probabilità NEGATIVA.
+    Poiché distribuzione_punteggi normalizza dividendo per la somma, il risultato
+    resta apparentemente valido (somma 1) e l'errore passa silenziosamente.
+
+    Esempio concreto: rho=-0.30 (estremo ammesso dallo slider in
+    pages/backtesting.py) con xG casa 3.5 dà tau(0,1) = 1 - 1.05 = -0.05.
+    Un xG sopra 3.34 è raggiungibile con la configurazione di default, dove
+    peso_storico è 0 e l'xG viene interamente dalla componente forma."""
+    limite_inferiore = max(-1.0 / lam, -1.0 / mu) if lam > 0 and mu > 0 else -1.0
+    limite_superiore = min(1.0 / (lam * mu), 1.0) if lam > 0 and mu > 0 else 1.0
+    return float(np.clip(rho, limite_inferiore, limite_superiore))
+
+
 def tau_dixon_coles(x, y, lam, mu, rho):
     """Fattore di correzione di Dixon & Coles (1997) per i 4 risultati a basso
-    punteggio, dove il Poisson indipendente sottostima sistematicamente i pareggi."""
+    punteggio, dove il Poisson indipendente sottostima sistematicamente i pareggi.
+    Assume rho già vincolato da rho_ammissibile: fuori da quella regione
+    restituirebbe fattori negativi."""
     if x == 0 and y == 0:
         return 1 - lam * mu * rho
     if x == 0 and y == 1:
@@ -187,6 +235,10 @@ def distribuzione_punteggi(xg_casa, xg_trasferta, rho, max_gol=MAX_GOL):
     p_casa = poisson.pmf(gol, xg_casa)
     p_trasferta = poisson.pmf(gol, xg_trasferta)
     matrice = np.outer(p_casa, p_trasferta)
+
+    # Senza questo vincolo, xG alti + rho molto negativo producono celle negative
+    # (vedi rho_ammissibile): probabilità negative mascherate dalla normalizzazione.
+    rho = rho_ammissibile(xg_casa, xg_trasferta, rho)
 
     matrice[0, 0] *= tau_dixon_coles(0, 0, xg_casa, xg_trasferta, rho)
     matrice[0, 1] *= tau_dixon_coles(0, 1, xg_casa, xg_trasferta, rho)

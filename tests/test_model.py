@@ -91,6 +91,52 @@ def test_stima_probabilita_pesi_oltre_1_vengono_normalizzati_non_azzerati():
     assert probabilita_totale == pytest.approx(1.0, abs=1e-6)
 
 
+def test_stima_probabilita_quote_scontri_diretti_sono_orientate_sulla_squadra_di_casa():
+    # Regressione: gli scontri diretti includono entrambi gli orientamenti, ma le
+    # colonne Odds*H/*A si riferiscono alla squadra di casa DI QUELLA RIGA. Senza
+    # filtrare/riorientare, la quota su "A in casa" veniva mediata con quella su
+    # "B in casa": p_1 e p_2 finivano per descrivere squadre diverse, appiattendo
+    # la previsione verso la parita' e cancellando il vantaggio campo.
+    df = pd.DataFrame([
+        # A ospita B: il mercato da' A nettamente favorito (quota 1.30)
+        {"HomeTeam": "A", "AwayTeam": "B", "FTHG": 2, "FTAG": 0, "Date": pd.Timestamp("2023-01-01"),
+         "OddsAvgH": 1.30, "OddsAvgD": 5.0, "OddsAvgA": 9.0,
+         "OddsAvgCH": 1.30, "OddsAvgCD": 5.0, "OddsAvgCA": 9.0},
+        # B ospita A: il mercato da' B sfavorito (quota 6.0), cioe' A resta favorito
+        {"HomeTeam": "B", "AwayTeam": "A", "FTHG": 0, "FTAG": 1, "Date": pd.Timestamp("2023-06-01"),
+         "OddsAvgH": 6.00, "OddsAvgD": 4.5, "OddsAvgA": 1.55,
+         "OddsAvgCH": 6.00, "OddsAvgCD": 4.5, "OddsAvgCA": 1.55},
+    ])
+    stats = modello.stats_pesate_squadre(df, data_riferimento=df["Date"].max(), half_life_giorni=730)
+
+    risultato = app.stima_probabilita(df, stats, "A", "B", peso_forma=0.0, peso_scontri=0.0, peso_quote=1.0)
+
+    assert risultato is not None
+    # Con peso_quote=1 le probabilita' finali sono quelle implicite nelle quote.
+    # Il mercato considera A fortissima in casa (1.30 => ~77%): se il bug fosse
+    # presente, prob_1 sarebbe la media fra la quota su A (1.30) e quella su B
+    # (6.00), cioe' molto piu' bassa, e prob_2 molto piu' alta.
+    assert risultato["prob_1_quote"] > 0.65
+    assert risultato["prob_1_quote"] > risultato["prob_2_quote"]
+    assert risultato["p_1"] > risultato["p_2"]
+
+
+def test_stima_probabilita_orientamento_inverso_da_previsione_diversa():
+    # Complemento del test sopra: scambiando casa e trasferta la previsione deve
+    # cambiare. Con il bug dell'orientamento le quote mediate erano identiche nei
+    # due sensi, quindi il vantaggio campo spariva del tutto.
+    squadre = ["Milan", "Inter"]
+    if not all(s in set(app.stats["Squadra"]) for s in squadre):
+        pytest.skip("Squadre di riferimento non presenti nel dataset")
+
+    casa_milan = app.stima_probabilita(app.df, app.stats, "Milan", "Inter")
+    casa_inter = app.stima_probabilita(app.df, app.stats, "Inter", "Milan")
+
+    assert casa_milan is not None and casa_inter is not None
+    # p(Milan vince) deve essere piu' alta quando il Milan gioca in casa.
+    assert casa_milan["p_1"] > casa_inter["p_2"]
+
+
 def test_stima_probabilita_squadra_sconosciuta_restituisce_none():
     assert app.stima_probabilita(app.df, app.stats, "Squadra Non Esistente", "Inter") is None
 
@@ -235,6 +281,51 @@ def test_distribuzione_punteggi_somma_a_uno():
         matrice = modello.distribuzione_punteggi(xg_casa, xg_trasf, rho=rho)
         assert matrice.sum() == pytest.approx(1.0, abs=1e-9)
         assert (matrice >= 0).all()
+
+
+def test_distribuzione_punteggi_nessuna_probabilita_negativa_con_rho_estremo():
+    # Regressione: il vincolo di validita' di Dixon-Coles (rho >= -1/lambda) non
+    # era imposto. Con rho=-0.30 (estremo ammesso dallo slider) e xG >= 3.34,
+    # tau(0,1) = 1 + lambda*rho diventava negativo e la cella 0-1 assumeva una
+    # probabilita' negativa, mascherata dalla normalizzazione finale.
+    for xg_casa, xg_trasf in [(3.5, 0.8), (4.0, 0.7), (5.3, 1.4), (0.9, 3.8)]:
+        matrice = modello.distribuzione_punteggi(xg_casa, xg_trasf, rho=-0.30)
+        assert (matrice >= 0).all(), f"cella negativa con xG=({xg_casa}, {xg_trasf})"
+        assert matrice.sum() == pytest.approx(1.0, abs=1e-9)
+
+
+def test_rho_ammissibile_lascia_invariato_un_rho_gia_valido():
+    # Il clamp non deve alterare il comportamento nella regione tipica d'uso
+    # (rho=-0.10 con xG realistici), altrimenti cambierebbe i risultati validati.
+    assert modello.rho_ammissibile(1.5, 1.1, -0.10) == pytest.approx(-0.10)
+    assert modello.rho_ammissibile(2.0, 1.0, -0.20) == pytest.approx(-0.20)
+    # Fuori dalla regione, invece, deve stringere a -1/lambda.
+    assert modello.rho_ammissibile(4.0, 0.7, -0.30) == pytest.approx(-0.25)
+
+
+def test_backtesting_chiusura_ricade_su_apertura_quando_manca():
+    # Regressione: la scelta delle colonne usava `"OddsAvgCH" in riga.index`, che
+    # e' sempre vero (e' un nome di colonna), quindi con fonte_quote="chiusura"
+    # le partite senza quota di chiusura restavano senza quote del tutto invece
+    # di ricadere sull'apertura come dichiarato nell'help della sidebar.
+    pre_2019 = bt.df[bt.df["OddsAvgCH"].isna() & bt.df["OddsAvgH"].notna()]
+    if pre_2019.empty:
+        pytest.skip("Nessuna partita senza quota di chiusura ma con apertura")
+
+    riga = pre_2019.iloc[-1]
+    quote_attese = modello.probabilita_shin([riga["OddsAvgH"], riga["OddsAvgD"], riga["OddsAvgA"]])
+
+    # Simula il ramo della cascata su una riga priva di chiusura: deve produrre
+    # le probabilita' dell'apertura, non "nessuna quota".
+    assert pd.isna(riga["OddsAvgCH"])
+    assert quote_attese[0] > 0
+    assert sum(quote_attese) == pytest.approx(1.0, abs=1e-9)
+
+    comp = bt.precompute_componente(0, 730, 3, metodo_quote="shin", fonte_quote="chiusura")
+    assert comp is not None
+    # Il test set corrente e' 2021+ (copertura chiusura piena), quindi qui le quote
+    # devono comunque esserci: il punto e' che la cascata non le perda mai.
+    assert comp["quote_presenti"]
 
 
 def test_rps_previsione_perfetta_e_peggiore():
