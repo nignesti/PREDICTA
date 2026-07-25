@@ -30,6 +30,8 @@ from modello import rps
 N_STAGIONI_TRAINING = 10  # con 5 c'era overfitting severo; con 10 il divario train/test si riduce parecchio
 N_PARTITE_TIRI = 5  # finestra per le medie recenti di tiri in porta / corner
 N_GIORNI_CONGESTIONE = 14  # finestra per "quante partite nelle ultime N giornate"
+POSIZIONE_SALVEZZA = 17  # in Serie A (20 squadre) le ultime 3 retrocedono
+POSIZIONE_EUROPA = 6  # approssima Champions+Europa League+Conference nella maggior parte delle stagioni
 
 COLONNE_FEATURE = ["xG_casa_storico", "xG_trasf_storico", "xG_casa_forma", "xG_trasf_forma",
                    "xG_casa_scontri", "xG_trasf_scontri", "elo_casa", "elo_trasferta", "elo_diff",
@@ -43,6 +45,11 @@ COLONNE_TIRI = [
 COLONNE_RIPOSO = [
     "giorni_riposo_casa", "giorni_riposo_trasf", "partite_congestione_casa", "partite_congestione_trasf",
     "trasferta_precedente_casa", "trasferta_precedente_trasf",
+]
+
+COLONNE_MOTIVAZIONE = [
+    "distanza_salvezza_casa", "distanza_salvezza_trasf", "distanza_europa_casa", "distanza_europa_trasf",
+    "giornata_casa", "giornata_trasf",
 ]
 
 COLONNE_FEATURE_TIRI = COLONNE_FEATURE + COLONNE_TIRI
@@ -95,6 +102,48 @@ def ultima_partita_fu_trasferta(df, squadra, prima_di_idx):
     return 1.0 if ultima["AwayTeam"] == squadra else 0.0
 
 
+def costruisci_classifiche_progressive(df_stagione):
+    """df_stagione: le partite di UNA sola stagione, ordinate per data (come
+    e' gia' bt.test_df quando si processa una singola stagione). Restituisce
+    una lista della stessa lunghezza dove l'elemento i e' lo stato della
+    classifica (punti, partite giocate per squadra) calcolato SOLO sulle
+    partite con indice < i: walk-forward, nessun dato futuro rispetto alla
+    partita i-esima. Le squadre non ancora scese in campo non compaiono nei
+    dict (trattate a 0 punti/0 giocate da chi le consuma)."""
+    punti, giocate = {}, {}
+    stati = []
+    for _, row in df_stagione.iterrows():
+        stati.append((dict(punti), dict(giocate)))
+        h, a = row["HomeTeam"], row["AwayTeam"]
+        giocate[h] = giocate.get(h, 0) + 1
+        giocate[a] = giocate.get(a, 0) + 1
+        if row["FTHG"] > row["FTAG"]:
+            punti[h] = punti.get(h, 0) + 3
+        elif row["FTHG"] < row["FTAG"]:
+            punti[a] = punti.get(a, 0) + 3
+        else:
+            punti[h] = punti.get(h, 0) + 1
+            punti[a] = punti.get(a, 0) + 1
+    return stati
+
+
+def distanza_da_soglie(stato, squadre_tutte, squadra):
+    """Punti sopra/sotto le soglie di salvezza ed Europa (positivo = sopra la
+    soglia, es. al sicuro dalla retrocessione o in corsa per l'Europa) e
+    partite giocate dalla squadra. Richiede l'elenco completo delle squadre
+    della stagione per considerare a 0 punti quelle non ancora in classifica
+    (es. a inizio stagione)."""
+    punti, giocate = stato
+    if len(squadre_tutte) < POSIZIONE_SALVEZZA:
+        return np.nan, np.nan, giocate.get(squadra, 0)
+    punti_completi = {s: punti.get(s, 0) for s in squadre_tutte}
+    ordinati = sorted(punti_completi.values(), reverse=True)
+    soglia_salvezza = ordinati[POSIZIONE_SALVEZZA - 1]
+    soglia_europa = ordinati[POSIZIONE_EUROPA - 1]
+    p = punti_completi[squadra]
+    return p - soglia_salvezza, p - soglia_europa, giocate.get(squadra, 0)
+
+
 def componenti_in_dataframe(componenti):
     righe = []
     for c in componenti:
@@ -122,18 +171,26 @@ def componenti_in_dataframe(componenti):
             "partite_congestione_trasf": c.get("partite_congestione_trasf", np.nan),
             "trasferta_precedente_casa": c.get("trasferta_precedente_casa", np.nan),
             "trasferta_precedente_trasf": c.get("trasferta_precedente_trasf", np.nan),
+            "distanza_salvezza_casa": c.get("distanza_salvezza_casa", np.nan),
+            "distanza_salvezza_trasf": c.get("distanza_salvezza_trasf", np.nan),
+            "distanza_europa_casa": c.get("distanza_europa_casa", np.nan),
+            "distanza_europa_trasf": c.get("distanza_europa_trasf", np.nan),
+            "giornata_casa": c.get("giornata_casa", np.nan),
+            "giornata_trasf": c.get("giornata_trasf", np.nan),
             "esito": c["esito"],
         })
     return pd.DataFrame(righe)
 
 
-def calcola_componenti_per_stagione(stagione_test, half_life=730, n_forma=3, con_tiri=False, con_riposo=False):
+def calcola_componenti_per_stagione(stagione_test, half_life=730, n_forma=3, con_tiri=False, con_riposo=False,
+                                    con_motivazione=False):
     """Rialloca train/test/statistiche del modulo backtesting per una singola
     stagione (walk-forward corretto: train = tutto ciò che precede) e restituisce
     le componenti per-partita di quella stagione. Se con_tiri=True, aggiunge le
     medie recenti di tiri in porta/corner; se con_riposo=True, aggiunge giorni
-    di riposo/congestione di calendario (nessuna delle due e' nel modello di
-    produzione).
+    di riposo/congestione di calendario; se con_motivazione=True, aggiunge la
+    distanza dalle soglie di salvezza/Europa in classifica (nessuna delle tre
+    e' nel modello di produzione).
 
     Non usa bt.precompute_tutte così com'è: quella funzione scarta le partite
     senza storico valido, perdendo l'allineamento con l'indice originale di
@@ -156,6 +213,10 @@ def calcola_componenti_per_stagione(stagione_test, half_life=730, n_forma=3, con
     else:
         elo_casa_arr = np.full(len(test_df), np.nan)
         elo_trasf_arr = np.full(len(test_df), np.nan)
+
+    if con_motivazione:
+        classifiche = costruisci_classifiche_progressive(test_df)
+        squadre_stagione = sorted(set(test_df["HomeTeam"]) | set(test_df["AwayTeam"]))
 
     componenti = []
     for i in range(len(test_df)):
@@ -187,18 +248,30 @@ def calcola_componenti_per_stagione(stagione_test, half_life=730, n_forma=3, con
                 trasferta_precedente_casa=ultima_partita_fu_trasferta(df_fino_a_ora, casa, idx_globale),
                 trasferta_precedente_trasf=ultima_partita_fu_trasferta(df_fino_a_ora, trasferta, idx_globale),
             )
+        if con_motivazione:
+            dist_salv_c, dist_eur_c, giornata_c = distanza_da_soglie(classifiche[i], squadre_stagione, casa)
+            dist_salv_t, dist_eur_t, giornata_t = distanza_da_soglie(classifiche[i], squadre_stagione, trasferta)
+            comp.update(
+                distanza_salvezza_casa=dist_salv_c, distanza_salvezza_trasf=dist_salv_t,
+                distanza_europa_casa=dist_eur_c, distanza_europa_trasf=dist_eur_t,
+                giornata_casa=giornata_c, giornata_trasf=giornata_t,
+            )
         componenti.append(comp)
     return componenti
 
 
-def valuta_stagione(stagione_test, n_stagioni_training=N_STAGIONI_TRAINING, con_tiri=False, con_riposo=False):
-    colonne = COLONNE_FEATURE + (COLONNE_TIRI if con_tiri else []) + (COLONNE_RIPOSO if con_riposo else [])
+def valuta_stagione(stagione_test, n_stagioni_training=N_STAGIONI_TRAINING, con_tiri=False, con_riposo=False,
+                    con_motivazione=False):
+    colonne = (COLONNE_FEATURE + (COLONNE_TIRI if con_tiri else [])
+               + (COLONNE_RIPOSO if con_riposo else []) + (COLONNE_MOTIVAZIONE if con_motivazione else []))
     stagioni_disponibili = sorted(bt.df["Stagione"].astype(str).unique())
     idx_test = stagioni_disponibili.index(stagione_test)
     stagioni_training = stagioni_disponibili[max(0, idx_test - n_stagioni_training):idx_test]
 
-    df_train = pd.concat([componenti_in_dataframe(calcola_componenti_per_stagione(s, con_tiri=con_tiri, con_riposo=con_riposo)) for s in stagioni_training], ignore_index=True)
-    df_test = componenti_in_dataframe(calcola_componenti_per_stagione(stagione_test, con_tiri=con_tiri, con_riposo=con_riposo))
+    df_train = pd.concat([componenti_in_dataframe(calcola_componenti_per_stagione(
+        s, con_tiri=con_tiri, con_riposo=con_riposo, con_motivazione=con_motivazione)) for s in stagioni_training], ignore_index=True)
+    df_test = componenti_in_dataframe(calcola_componenti_per_stagione(
+        stagione_test, con_tiri=con_tiri, con_riposo=con_riposo, con_motivazione=con_motivazione))
 
     modello = HistGradientBoostingClassifier(
         max_iter=100, max_depth=2, learning_rate=0.03, l2_regularization=5.0,
@@ -224,11 +297,14 @@ def valuta_stagione(stagione_test, n_stagioni_training=N_STAGIONI_TRAINING, con_
 if __name__ == "__main__":
     con_tiri = "--con-tiri" in sys.argv
     con_riposo = "--con-riposo" in sys.argv
-    print(f"Feature tiri/corner: {'SI' if con_tiri else 'NO'} | Feature riposo/congestione: {'SI' if con_riposo else 'NO'}\n", flush=True)
+    con_motivazione = "--con-motivazione" in sys.argv
+    print(f"Feature tiri/corner: {'SI' if con_tiri else 'NO'} | Feature riposo/congestione: {'SI' if con_riposo else 'NO'} "
+          f"| Feature motivazione (salvezza/Europa): {'SI' if con_motivazione else 'NO'}\n", flush=True)
     risultati = {}
     for stagione in ["2025", "2024", "2023"]:
         print(f"=== Stagione di test: {stagione} ===", flush=True)
-        acc, rps_medio, ll, acc_train, n_train, n_test = valuta_stagione(stagione, con_tiri=con_tiri, con_riposo=con_riposo)
+        acc, rps_medio, ll, acc_train, n_train, n_test = valuta_stagione(
+            stagione, con_tiri=con_tiri, con_riposo=con_riposo, con_motivazione=con_motivazione)
         risultati[stagione] = (acc, rps_medio, ll)
         print(f"  n_train={n_train} n_test={n_test} acc_train={acc_train:.1%}")
         print(f"  HistGradientBoosting: acc={acc:.1%} rps={rps_medio:.4f} logloss={ll:.4f}", flush=True)
