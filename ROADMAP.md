@@ -6,7 +6,7 @@ Questo documento raccoglie l'analisi strategica completa su dati, feature e tecn
 
 ## 📍 Stato attuale (aggiornato al 25 luglio 2026)
 
-**Fasi 1, 2 e 3 chiuse.** 15 voci testate in totale, **2 adottate in produzione**.
+**Fasi 1, 2, 3 e 0 chiuse.** 15 voci testate in totale, **3 adottate in produzione** (Shin, quote di chiusura, medie di lega pesate).
 
 ### Configurazione di produzione
 
@@ -33,10 +33,12 @@ Tutti validati con lo stesso protocollo: 3 stagioni di test indipendenti (2023, 
 | 7 | xG reali di Understat | 2 | 53.87%¹ | 0.1919¹ | ⚠️ debolmente positivo, **non adottabile** (fonte ferma a set. 2024) |
 | 8 | Tendenza dell'arbitro | 2 | — | — | ❌ scartato: `Referee` copre 2 stagioni su 33 |
 | 9 | Modello Bayesiano gerarchico | 3 | 54.35% | 0.1883 | ❌ peggiore in accuratezza |
-| 10 | Ensemble stacking | 3 | 54.35% | **0.1880** | ⚠️ misto, non adottato (miglior RPS assoluto) |
-| 11 | Training multi-campionato | 3 | 54.08% | 0.1884 | ⚠️ RPS meglio in 3/3, accuratezza neutra, non adottato |
+| 10 | Ensemble stacking | 3 | 54.35% | 0.1880² | ➖ **rivalutato in Fase 0: indistinguibile**, non adottato |
+| 11 | Training multi-campionato | 3 | 54.08% | 0.1884² | ➖ **rivalutato in Fase 0: indistinguibile ma il più promettente** (p = 0.077) |
 | 12 | Indice motivazionale fine stagione | 3 | 53.91% | 0.1897 | ❌ negativo e coerente in 3/3 stagioni |
 | 13 | Formazioni/infortuni (API-Football) | 3 | — | — | ⛔ valutato, non implementato (a pagamento) |
+
+*² RPS misurato con la configurazione delle quote sbagliata (pre-Fase 2): con quella corretta l'ordinamento si ribalta, vedi Fase 0.*
 
 *¹ Understat è validato su 2021/2022/2023 e non sulle 3 stagioni standard, per limiti di copertura del dataset: il confronto onesto è contro 53.43%/0.1928 dello stesso modello ricalcolato su quella finestra, non contro i numeri di questa tabella.*
 
@@ -52,7 +54,7 @@ La spiegazione più probabile è la stessa in tutti i casi: **il mercato incorpo
 
 Con una precisazione importante aggiunta dopo la verifica di significatività: **anche i due "successi" non sono statisticamente distinguibili dal rumore.** Shin e quote di chiusura restano adottati — sono gratuiti, teoricamente fondati e vanno nella direzione giusta su entrambe le metriche — ma vanno descritti come "coerenti con l'attesa", non come miglioramenti misurati.
 
-Una nota secondaria ma ricorrente: **RPS e accuratezza si muovono spesso in direzioni opposte**. Ensemble stacking (0.1880) e multi-campionato (0.1884) hanno il miglior RPS mai misurato ma un'accuratezza sotto il modello statistico. Il criterio usato all'epoca era "guadagno pulito o quasi su entrambe le metriche" — da qui l'esclusione di entrambi. Alla luce dell'analisi di potenza quel criterio era sbagliato: l'accuratezza non aveva abbastanza potenza per bocciarli, mentre l'RPS li dava avanti. **Sono i due esperimenti che meritano di più una rivalutazione col protocollo nuovo.**
+Una nota secondaria ma ricorrente: **RPS e accuratezza si muovono spesso in direzioni opposte**. Ensemble stacking e multi-campionato sembravano avere il miglior RPS mai misurato, e il criterio dell'epoca ("guadagno su entrambe le metriche") li aveva esclusi. La **Fase 0 li ha rivalutati**: quel primato era un artefatto di un baseline sbagliato, e con la configurazione corretta sono entrambi *indistinguibili* dal modello statistico. La conclusione pratica non cambia, la motivazione sì — vedi la sezione Fase 0.
 
 ### Correzioni di bug (25 luglio 2026)
 
@@ -106,17 +108,69 @@ Due osservazioni pesanti:
 
 **Implicazione metodologica per il futuro**: usare l'RPS con intervallo di confidenza bootstrap come criterio primario e l'accuratezza solo come metrica descrittiva; usare la finestra a 7 stagioni invece che 3 (nessun dato nuovo necessario); e dichiarare esplicitamente "non distinguibile" invece di "leggermente meglio/peggio" quando è il caso. Diversi esperimenti archiviati come negativi meriterebbero di essere rivalutati con questo protocollo.
 
+## Fase 0 — Protocollo di misura ✅
+
+Introdotta dopo la scoperta che nessun risultato di Fase 2 e 3 fosse statisticamente distinguibile. Non aggiunge feature: rende interpretabili gli esperimenti.
+
+### `protocollo.py` — il modulo di misura
+
+Impone quattro regole a ogni confronto futuro:
+
+1. **RPS come criterio primario**, con intervallo di confidenza bootstrap appaiato. Usa ogni partita, non solo quelle che cambiano previsione.
+2. **Accuratezza come metrica descrittiva**, testata con McNemar e mai riportata come "meglio/peggio" senza il test.
+3. **Finestra di test a 7 stagioni** (2019-2025), l'intera copertura delle quote di chiusura.
+4. **Verdetto esplicito a tre valori**: `MEGLIO` / `PEGGIO` / `INDISTINGUIBILE`. Quest'ultimo è un risultato legittimo, non da arrotondare.
+
+Include il calcolo di potenza: dato un confronto indistinguibile, dice quante partite servirebbero per risolverlo. Coperto da 11 test propri (`tests/test_protocollo.py`) che verificano entrambi i lati dell'errore — che riconosca un effetto vero **e** che dichiari indistinguibile il rumore.
+
+### Un difetto che invalidava due conclusioni di Fase 3
+
+`prototipo_gradient_boosting.py` chiamava `bt.precompute_componente` senza passare la configurazione delle quote, ereditandone i default `proporzionale`/`apertura`/`storiche`: cioè il modello **pre-Fase 2**. Sia il baseline statistico sia le feature `prob_1_quote`/`prob_X_quote`/`prob_2_quote` — 3 delle 12 feature del gradient boosting — erano calcolate col metodo vecchio, nonostante i docstring dichiarassero "quote di chiusura con Shin". Corretto con costanti esplicite (`METODO_QUOTE`, `FONTE_QUOTE`, `MEDIE_LEGA`).
+
+### Risultati della rivalutazione (7 stagioni, 2.659 partite)
+
+`valida_fase0_rivalutazione.py` e `valida_fase0_multiliga.py`:
+
+| Confronto | Δ RPS | Δ acc | Discordanti | McNemar | Verdetto |
+|---|---:|---:|---:|---:|---|
+| Ensemble stacking vs statistico | +0.00042 | −0.15 pp | 44 | 0.65 | ➖ indistinguibile |
+| Gradient boosting vs statistico | +0.00039 | +0.11 pp | 83 | 0.83 | ➖ indistinguibile |
+| Stacking vs gradient boosting | +0.00004 | −0.26 pp | 97 | 0.54 | ➖ indistinguibile |
+| **GB multi-campionato vs GB solo Serie A** | **−0.00065** | −0.56 pp | 63 | 0.08 | ➖ indistinguibile *(il più vicino)* |
+
+**L'ipotesi di partenza è smentita.** La Fase 0 era nata dal sospetto che stacking e multi-campionato fossero risultati positivi archiviati per errore, perché avevano l'RPS migliore mai misurato (0.1880 e 0.1884 contro 0.1889). Con il baseline corretto l'ordinamento **si ribalta**: il modello statistico passa a 0.1908 e lo stacking a 0.1912. Quel primato era un artefatto del confronto con la configurazione pre-Fase 2. Non erano risultati positivi: non erano niente.
+
+**Il calcolo di potenza è la parte che cambia la strategia:**
+
+| Confronto | Partite per risolverlo su RPS | Su accuratezza |
+|---|---:|---:|
+| Stacking vs statistico | 13.540 (~36 stagioni) | 28.645 (~75 stagioni) |
+| GB vs statistico | 24.573 (~65 stagioni) | 94.891 (~250 stagioni) |
+| Stacking vs GB | 2.308.901 (~6.076 stagioni) | 20.532 (~54 stagioni) |
+| **GB multi-campionato vs solo Serie A** | **5.521 (~15 stagioni)** | **3.039 (~8 stagioni)** |
+
+La Serie A produce 380 partite l'anno: **queste domande non sono rispondibili con un solo campionato.** Non è un limite del protocollo, è la dimensione reale degli effetti.
+
+### Conseguenze
+
+1. **La decisione di non adottare stacking e gradient boosting resta valida, ma per un motivo diverso.** Non "sono peggiori" — non lo sono — bensì "non sono migliori, e costano due modelli in più da mantenere e riaddestrare". Fra configurazioni equivalenti si tiene la più semplice. Questa motivazione è difendibile; quella scritta in precedenza no.
+
+2. **Il multi-campionato è l'unico esperimento ancora vivo.** È il più vicino alla significatività (p = 0.077, IC dell'RPS quasi interamente sotto lo zero) e l'unico che richiede una quantità di dati raggiungibile: ~5.500 partite contro le 2.659 attuali, cioè poco più del doppio.
+
+3. **La via d'uscita dal regime "tutto indistinguibile"**: le altre 4 leghe sono già scaricate e usate solo come *training*. Usarle anche come **test** porterebbe il campione a ~13.000 partite su 7 stagioni — esattamente l'ordine di grandezza necessario a risolvere sia il multi-campionato sia lo stacking. Richiede di verificare che le quote di chiusura siano coperte anche lì e che il modello statistico sia calcolabile per-lega (entrambe le cose già fatte in `prototipo_gradient_boosting_multiliga.py`), ma nessun dato nuovo.
+
 ### Cosa resta aperto
 
-**La priorità 0 non è una feature: è il protocollo di misura.** Finché ogni esperimento produce differenze indistinguibili dal rumore, aggiungere feature significa scegliere a caso quali tenere. Le voci 1-4 hanno senso solo dopo la 0.
+**La priorità non è una feature: è il campione.** La Fase 0 ha mostrato che gli effetti in gioco richiedono 15-65 stagioni di test per essere misurati, mentre la Serie A ne produce una all'anno. Finché il campione resta questo, aggiungere feature significa scegliere a caso quali tenere.
 
 | Priorità | Voce | Perché | Riferimento |
 |---|---|---|---|
-| **0** | **Protocollo di misura: RPS con IC bootstrap come criterio primario, finestra di test a 7 stagioni, McNemar sull'accuratezza** | Nessun dato nuovo, nessun modello nuovo. È il prerequisito perché qualunque altro esperimento sia interpretabile. Include la rivalutazione degli esperimenti già archiviati come negativi | Sezione "problema di misura" sopra |
-| **1** | **Movimento apertura→chiusura e dispersione tra bookmaker** come feature separate | L'unica idea rimasta che segue la logica dei due miglioramenti adottati: nessun dato nuovo, solo informazione già nel dataset estratta meglio. Il delta apertura→chiusura è letteratura nota come proxy di denaro informato | Fase 2, punto 6 (in coda) |
-| 2 | **pi-ratings** (Constantinou & Fenton) | L'unico sistema di rating continuo mai provato; nei paper supera Elo semplice sulla predizione 1X2 — ma Elo qui è risultato negativo, quindi l'aspettativa va tarata al ribasso | Tier 2 |
-| 3 | **Valore di mercato Transfermarkt** come slope temporale (30/90/180gg) e prior shrinked | Cattura cambi di rosa che le medie storiche vedono in ritardo. Da usare come variazione, non come feature statica | Fase 2, punto 5 |
-| 4 | **Fonte xG aggiornabile** | Il segnale Understat è debolmente positivo; serve una fonte che non si fermi a settembre 2024. Lo scarto xG − gol reali come proxy di regressione alla media resta l'idea più interessante | Fase 2, punto 4 |
+| ~~0~~ | ~~Protocollo di misura~~ | ✅ **fatto**, vedi la sezione Fase 0 sopra | `protocollo.py` |
+| **1** | **Altre 4 leghe come TEST, non solo come training** | L'unico modo per uscire dal regime in cui ogni esperimento è indistinguibile: porta il campione da 2.659 a ~13.000 partite, l'ordine di grandezza che serve. Dati già scaricati, nessuna fonte nuova. Sblocca anche il multi-campionato, l'unico esperimento ancora vivo (p = 0.077) | Fase 0, conseguenza 3 |
+| **2** | **Movimento apertura→chiusura e dispersione tra bookmaker** come feature separate | L'unica idea rimasta che segue la logica dei due miglioramenti adottati: nessun dato nuovo, solo informazione già nel dataset estratta meglio. Il delta apertura→chiusura è letteratura nota come proxy di denaro informato | Fase 2, punto 6 (in coda) |
+| 3 | **pi-ratings** (Constantinou & Fenton) | L'unico sistema di rating continuo mai provato; nei paper supera Elo semplice sulla predizione 1X2 — ma Elo qui è risultato negativo, quindi l'aspettativa va tarata al ribasso | Tier 2 |
+| 4 | **Valore di mercato Transfermarkt** come slope temporale (30/90/180gg) e prior shrinked | Cattura cambi di rosa che le medie storiche vedono in ritardo. Da usare come variazione, non come feature statica | Fase 2, punto 5 |
+| 5 | **Fonte xG aggiornabile** | Il segnale Understat è debolmente positivo; serve una fonte che non si fermi a settembre 2024. Lo scarto xG − gol reali come proxy di regressione alla media resta l'idea più interessante | Fase 2, punto 4 |
 
 Una nota di realismo su tutte e quattro: il mercato delle scommesse su Serie A è liquido ed efficiente, e sette anni di dati dicono che il margine sfruttabile sopra la quota di chiusura, se esiste, è inferiore a mezzo punto percentuale. È un risultato in sé, non un fallimento — ed è coerente con la letteratura sull'efficienza dei mercati di scommesse.
 

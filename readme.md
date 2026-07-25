@@ -118,6 +118,7 @@ Il dettaglio di ogni esperimento — con numeri, causa probabile del fallimento 
 PredictA/
 ├── app.py                                  # Dashboard principale
 ├── modello.py                              # Modulo condiviso: Dixon-Coles, decadimento temporale, Shin, RPS, Elo
+├── protocollo.py                           # Protocollo di misura: RPS+bootstrap, McNemar, calcolo di potenza
 ├── unisci_dati.py                          # Unisce i CSV stagionali (Date, Stagione, quote apertura e chiusura)
 ├── scarica_elo.py                          # Scarica lo storico Elo delle squadre da clubelo.com
 ├── scarica_altre_leghe.py                  # Scarica Premier/Liga/Bundesliga/Ligue 1 (prototipo multi-lega)
@@ -131,7 +132,8 @@ PredictA/
 │
 ├── tests/
 │   ├── conftest.py
-│   └── test_model.py                       # Test automatici su forma, scontri diretti, pesi, Elo, Shin, integrità dati
+│   ├── test_model.py                       # Test automatici su forma, scontri diretti, pesi, Elo, Shin, integrità dati
+│   └── test_protocollo.py                  # Test del protocollo: riconosce un effetto vero, dichiara indistinguibile il rumore
 │
 ├── stagioni/                               # File .txt delle singole stagioni (1993 → 2025)
 ├── altre_leghe/                            # Storico delle altre 4 leghe (gitignored)
@@ -142,6 +144,8 @@ PredictA/
 ├── valida_medie_lega.py                    # Validazione: medie di lega pesate nel tempo (adottata)
 ├── valida_pesi_medie_pesate.py             # Grid search dei pesi con le medie pesate
 ├── valida_significativita.py               # Test di significativita' (McNemar + bootstrap RPS)
+├── valida_fase0_rivalutazione.py           # Fase 0: rivalutazione ensemble stacking / gradient boosting
+├── valida_fase0_multiliga.py               # Fase 0: rivalutazione multi-campionato
 ├── valida_understat.py                     # Validazione: xG reali di Understat (non adottata)
 ├── prototipo_gradient_boosting.py          # Prototipo ML (+ flag --con-tiri, --con-riposo, --con-motivazione)
 ├── prototipo_gradient_boosting_multiliga.py# Prototipo ML con training multi-campionato
@@ -219,12 +223,13 @@ streamlit run app.py
 
 ## 📈 Prossimi Sviluppi
 
-Fase 1, Fase 2 e Fase 3 della roadmap sono **chiuse**: 15 voci testate, 3 adottate in produzione (correzione di Shin, quote di chiusura, medie di lega pesate nel tempo).
+Fase 1, Fase 2, Fase 3 e Fase 0 della roadmap sono **chiuse**: 15 voci testate, 3 adottate in produzione (correzione di Shin, quote di chiusura, medie di lega pesate nel tempo).
 
 La lezione operativa è che **le feature nuove non pagano, mentre estrarre meglio l'informazione dalle quote sì** — ma con l'avvertenza pesante della sezione sull'affidabilità sopra: nessuna di queste differenze è statisticamente distinguibile. Da qui l'ordine dei prossimi passi:
 
-- [ ] **Protocollo di misura** (priorità 0, prerequisito per tutto il resto): RPS con intervallo di confidenza bootstrap come criterio primario, finestra di test a 7 stagioni invece di 3, McNemar sull'accuratezza. Nessun dato nuovo richiesto
-- [ ] **Rivalutare ensemble stacking e multi-campionato** col protocollo nuovo: erano stati bocciati sull'accuratezza, che non aveva la potenza per bocciarli, mentre sull'RPS erano avanti
+- [x] **Protocollo di misura** — fatto: `protocollo.py` (RPS con IC bootstrap come criterio primario, finestra a 7 stagioni, McNemar, calcolo di potenza), con 11 test propri
+- [x] **Rivalutare ensemble stacking e multi-campionato** — fatto: entrambi **indistinguibili** dal modello statistico su 2.659 partite. Il loro presunto vantaggio di RPS era un artefatto di un baseline sbagliato nei prototipi
+- [ ] **Altre 4 leghe come test, non solo come training** (nuova priorità 1): la Fase 0 ha mostrato che servono 15-65 stagioni per misurare gli effetti in gioco, mentre la Serie A ne produce una all'anno. Usare le altre leghe come test porta il campione da 2.659 a ~13.000 partite, che è l'ordine di grandezza necessario. Dati già scaricati
 - [ ] **Movimento apertura→chiusura e dispersione tra bookmaker** come feature separate (non come sostituzione della quota): l'unica idea rimasta che segue la stessa logica dei miglioramenti adottati
 - [ ] **pi-ratings** (Constantinou & Fenton): l'unico sistema di rating continuo mai provato — Elo è stato testato ed è risultato negativo
 - [ ] **Valore di mercato Transfermarkt** come variazione temporale (slope 30/90/180gg), non come feature statica

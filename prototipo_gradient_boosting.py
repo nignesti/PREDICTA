@@ -27,6 +27,19 @@ from sklearn.metrics import accuracy_score, log_loss
 import backtesting as bt
 from modello import rps
 
+# Configurazione delle quote usata per calcolare le componenti. Va tenuta uguale
+# a quella di produzione, altrimenti il prototipo viene confrontato con un
+# baseline diverso da quello reale.
+# NOTA STORICA: fino alla Fase 0 questi valori non venivano passati affatto, quindi
+# precompute_componente usava i suoi default ("proporzionale"/"apertura"/"storiche")
+# — cioe' il modello PRE-Fase 2. Le conclusioni di Fase 2 punto 3 e Fase 3 punto 2
+# (gradient boosting ed ensemble stacking) sono state tratte confrontando quei
+# prototipi con un baseline che non era quello di produzione, e con le probabilita'
+# delle quote (prob_*_quote, che sono fra le feature) calcolate col metodo vecchio.
+METODO_QUOTE = "shin"
+FONTE_QUOTE = "chiusura"
+MEDIE_LEGA = "pesate"
+
 N_STAGIONI_TRAINING = 10  # con 5 c'era overfitting severo; con 10 il divario train/test si riduce parecchio
 N_PARTITE_TIRI = 5  # finestra per le medie recenti di tiri in porta / corner
 N_GIORNI_CONGESTIONE = 14  # finestra per "quante partite nelle ultime N giornate"
@@ -220,7 +233,8 @@ def calcola_componenti_per_stagione(stagione_test, half_life=730, n_forma=3, con
 
     componenti = []
     for i in range(len(test_df)):
-        comp = bt.precompute_componente(i, half_life, n_forma, elo_casa=elo_casa_arr[i], elo_trasferta=elo_trasf_arr[i])
+        comp = bt.precompute_componente(i, half_life, n_forma, elo_casa=elo_casa_arr[i], elo_trasferta=elo_trasf_arr[i],
+                                        metodo_quote=METODO_QUOTE, fonte_quote=FONTE_QUOTE, medie_lega=MEDIE_LEGA)
         if comp is None:
             continue
         riga = test_df.iloc[i]
