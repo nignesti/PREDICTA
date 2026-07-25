@@ -29,15 +29,23 @@ from modello import rps
 
 N_STAGIONI_TRAINING = 10  # con 5 c'era overfitting severo; con 10 il divario train/test si riduce parecchio
 N_PARTITE_TIRI = 5  # finestra per le medie recenti di tiri in porta / corner
+N_GIORNI_CONGESTIONE = 14  # finestra per "quante partite nelle ultime N giornate"
 
 COLONNE_FEATURE = ["xG_casa_storico", "xG_trasf_storico", "xG_casa_forma", "xG_trasf_forma",
                    "xG_casa_scontri", "xG_trasf_scontri", "elo_casa", "elo_trasferta", "elo_diff",
                    "prob_1_quote", "prob_X_quote", "prob_2_quote"]
 
-COLONNE_FEATURE_TIRI = COLONNE_FEATURE + [
+COLONNE_TIRI = [
     "tiri_porta_fatti_casa", "tiri_porta_subiti_casa", "corner_fatti_casa", "corner_subiti_casa",
     "tiri_porta_fatti_trasf", "tiri_porta_subiti_trasf", "corner_fatti_trasf", "corner_subiti_trasf",
 ]
+
+COLONNE_RIPOSO = [
+    "giorni_riposo_casa", "giorni_riposo_trasf", "partite_congestione_casa", "partite_congestione_trasf",
+    "trasferta_precedente_casa", "trasferta_precedente_trasf",
+]
+
+COLONNE_FEATURE_TIRI = COLONNE_FEATURE + COLONNE_TIRI
 
 
 def calcola_media_recente(df, squadra, prima_di_idx, col_casa, col_trasferta, n=N_PARTITE_TIRI):
@@ -51,6 +59,40 @@ def calcola_media_recente(df, squadra, prima_di_idx, col_casa, col_trasferta, n=
     trasferta = df_prima[df_prima["AwayTeam"] == squadra].tail(n)
     valori = list(casa[col_casa].dropna()) + list(trasferta[col_trasferta].dropna())
     return np.mean(valori) if valori else np.nan
+
+
+def calcola_giorni_riposo(df, squadra, prima_di_idx, data_partita):
+    """Giorni trascorsi dall'ultima partita giocata dalla squadra (casa o
+    trasferta) prima di questa, calcolo walk-forward point-in-time (nessun dato
+    futuro). NaN se e' la prima partita della squadra nel dataset fino a qui."""
+    df_prima = df.iloc[:prima_di_idx]
+    partite_squadra = df_prima[(df_prima["HomeTeam"] == squadra) | (df_prima["AwayTeam"] == squadra)]
+    if partite_squadra.empty:
+        return np.nan
+    return (data_partita - partite_squadra["Date"].max()).days
+
+
+def conta_partite_congestione(df, squadra, prima_di_idx, data_partita, giorni=N_GIORNI_CONGESTIONE):
+    """Numero di partite giocate dalla squadra negli ultimi 'giorni' prima
+    della data della partita da prevedere (congestione di calendario: coppe,
+    recuperi...)."""
+    df_prima = df.iloc[:prima_di_idx]
+    partite_squadra = df_prima[(df_prima["HomeTeam"] == squadra) | (df_prima["AwayTeam"] == squadra)]
+    soglia = data_partita - pd.Timedelta(days=giorni)
+    return int(((partite_squadra["Date"] > soglia) & (partite_squadra["Date"] < data_partita)).sum())
+
+
+def ultima_partita_fu_trasferta(df, squadra, prima_di_idx):
+    """1.0 se l'ultima partita giocata dalla squadra prima di questa era in
+    trasferta, 0.0 se in casa, NaN se non ci sono partite precedenti (serve a
+    intercettare "trasferta dopo trasferta", segnalata come possibile fattore
+    di affaticamento da una revisione esterna)."""
+    df_prima = df.iloc[:prima_di_idx]
+    partite_squadra = df_prima[(df_prima["HomeTeam"] == squadra) | (df_prima["AwayTeam"] == squadra)]
+    if partite_squadra.empty:
+        return np.nan
+    ultima = partite_squadra.sort_values("Date").iloc[-1]
+    return 1.0 if ultima["AwayTeam"] == squadra else 0.0
 
 
 def componenti_in_dataframe(componenti):
@@ -74,20 +116,28 @@ def componenti_in_dataframe(componenti):
             "tiri_porta_subiti_trasf": c.get("tiri_porta_subiti_trasf", np.nan),
             "corner_fatti_trasf": c.get("corner_fatti_trasf", np.nan),
             "corner_subiti_trasf": c.get("corner_subiti_trasf", np.nan),
+            "giorni_riposo_casa": c.get("giorni_riposo_casa", np.nan),
+            "giorni_riposo_trasf": c.get("giorni_riposo_trasf", np.nan),
+            "partite_congestione_casa": c.get("partite_congestione_casa", np.nan),
+            "partite_congestione_trasf": c.get("partite_congestione_trasf", np.nan),
+            "trasferta_precedente_casa": c.get("trasferta_precedente_casa", np.nan),
+            "trasferta_precedente_trasf": c.get("trasferta_precedente_trasf", np.nan),
             "esito": c["esito"],
         })
     return pd.DataFrame(righe)
 
 
-def calcola_componenti_per_stagione(stagione_test, half_life=730, n_forma=3, con_tiri=False):
+def calcola_componenti_per_stagione(stagione_test, half_life=730, n_forma=3, con_tiri=False, con_riposo=False):
     """Rialloca train/test/statistiche del modulo backtesting per una singola
     stagione (walk-forward corretto: train = tutto ciò che precede) e restituisce
     le componenti per-partita di quella stagione. Se con_tiri=True, aggiunge le
-    medie recenti di tiri in porta/corner (non ancora nel modello di produzione).
+    medie recenti di tiri in porta/corner; se con_riposo=True, aggiunge giorni
+    di riposo/congestione di calendario (nessuna delle due e' nel modello di
+    produzione).
 
     Non usa bt.precompute_tutte così com'è: quella funzione scarta le partite
     senza storico valido, perdendo l'allineamento con l'indice originale di
-    test_df di cui questa funzione ha bisogno per calcolare le feature sui tiri
+    test_df di cui questa funzione ha bisogno per calcolare le feature extra
     sullo stesso sottoinsieme di partite."""
     bt.stagioni_test = [stagione_test]
     bt.train_df = bt.df[~bt.df["Stagione"].astype(str).isin(bt.stagioni_test)].copy()
@@ -95,22 +145,28 @@ def calcola_componenti_per_stagione(stagione_test, half_life=730, n_forma=3, con
     bt.media_gol_casa = bt.train_df["FTHG"].mean()
     bt.media_gol_trasferta = bt.train_df["FTAG"].mean()
     bt.media_gol_generale = (bt.media_gol_casa + bt.media_gol_trasferta) / 2
-    bt.modello_elo_casa, bt.modello_elo_trasferta = bt.calibra_regressione_elo(bt.train_df, bt.elo_df)
+    bt.modello_elo_casa, bt.modello_elo_trasferta = (
+        bt.calibra_regressione_elo(bt.train_df, bt.elo_df) if bt.ELO_DISPONIBILE else (None, None)
+    )
 
     train_df, test_df = bt.train_df, bt.test_df
-    elo_casa_arr = bt.elo_asof_batch(bt.elo_df, test_df["HomeTeam"], test_df["Date"])
-    elo_trasf_arr = bt.elo_asof_batch(bt.elo_df, test_df["AwayTeam"], test_df["Date"])
+    if bt.ELO_DISPONIBILE:
+        elo_casa_arr = bt.elo_asof_batch(bt.elo_df, test_df["HomeTeam"], test_df["Date"])
+        elo_trasf_arr = bt.elo_asof_batch(bt.elo_df, test_df["AwayTeam"], test_df["Date"])
+    else:
+        elo_casa_arr = np.full(len(test_df), np.nan)
+        elo_trasf_arr = np.full(len(test_df), np.nan)
 
     componenti = []
     for i in range(len(test_df)):
         comp = bt.precompute_componente(i, half_life, n_forma, elo_casa=elo_casa_arr[i], elo_trasferta=elo_trasf_arr[i])
         if comp is None:
             continue
+        riga = test_df.iloc[i]
+        casa, trasferta = riga["HomeTeam"], riga["AwayTeam"]
+        idx_globale = len(train_df) + i
+        df_fino_a_ora = pd.concat([train_df, test_df.iloc[:i + 1]])
         if con_tiri:
-            riga = test_df.iloc[i]
-            casa, trasferta = riga["HomeTeam"], riga["AwayTeam"]
-            idx_globale = len(train_df) + i
-            df_fino_a_ora = pd.concat([train_df, test_df.iloc[:i + 1]])
             comp.update(
                 tiri_porta_fatti_casa=calcola_media_recente(df_fino_a_ora, casa, idx_globale, "HST", "AST"),
                 tiri_porta_subiti_casa=calcola_media_recente(df_fino_a_ora, casa, idx_globale, "AST", "HST"),
@@ -121,18 +177,28 @@ def calcola_componenti_per_stagione(stagione_test, half_life=730, n_forma=3, con
                 corner_fatti_trasf=calcola_media_recente(df_fino_a_ora, trasferta, idx_globale, "AC", "HC"),
                 corner_subiti_trasf=calcola_media_recente(df_fino_a_ora, trasferta, idx_globale, "HC", "AC"),
             )
+        if con_riposo:
+            data_partita = riga["Date"]
+            comp.update(
+                giorni_riposo_casa=calcola_giorni_riposo(df_fino_a_ora, casa, idx_globale, data_partita),
+                giorni_riposo_trasf=calcola_giorni_riposo(df_fino_a_ora, trasferta, idx_globale, data_partita),
+                partite_congestione_casa=conta_partite_congestione(df_fino_a_ora, casa, idx_globale, data_partita),
+                partite_congestione_trasf=conta_partite_congestione(df_fino_a_ora, trasferta, idx_globale, data_partita),
+                trasferta_precedente_casa=ultima_partita_fu_trasferta(df_fino_a_ora, casa, idx_globale),
+                trasferta_precedente_trasf=ultima_partita_fu_trasferta(df_fino_a_ora, trasferta, idx_globale),
+            )
         componenti.append(comp)
     return componenti
 
 
-def valuta_stagione(stagione_test, n_stagioni_training=N_STAGIONI_TRAINING, con_tiri=False):
-    colonne = COLONNE_FEATURE_TIRI if con_tiri else COLONNE_FEATURE
+def valuta_stagione(stagione_test, n_stagioni_training=N_STAGIONI_TRAINING, con_tiri=False, con_riposo=False):
+    colonne = COLONNE_FEATURE + (COLONNE_TIRI if con_tiri else []) + (COLONNE_RIPOSO if con_riposo else [])
     stagioni_disponibili = sorted(bt.df["Stagione"].astype(str).unique())
     idx_test = stagioni_disponibili.index(stagione_test)
     stagioni_training = stagioni_disponibili[max(0, idx_test - n_stagioni_training):idx_test]
 
-    df_train = pd.concat([componenti_in_dataframe(calcola_componenti_per_stagione(s, con_tiri=con_tiri)) for s in stagioni_training], ignore_index=True)
-    df_test = componenti_in_dataframe(calcola_componenti_per_stagione(stagione_test, con_tiri=con_tiri))
+    df_train = pd.concat([componenti_in_dataframe(calcola_componenti_per_stagione(s, con_tiri=con_tiri, con_riposo=con_riposo)) for s in stagioni_training], ignore_index=True)
+    df_test = componenti_in_dataframe(calcola_componenti_per_stagione(stagione_test, con_tiri=con_tiri, con_riposo=con_riposo))
 
     modello = HistGradientBoostingClassifier(
         max_iter=100, max_depth=2, learning_rate=0.03, l2_regularization=5.0,
@@ -157,11 +223,12 @@ def valuta_stagione(stagione_test, n_stagioni_training=N_STAGIONI_TRAINING, con_
 
 if __name__ == "__main__":
     con_tiri = "--con-tiri" in sys.argv
-    print(f"Feature tiri/corner: {'SI' if con_tiri else 'NO'}\n", flush=True)
+    con_riposo = "--con-riposo" in sys.argv
+    print(f"Feature tiri/corner: {'SI' if con_tiri else 'NO'} | Feature riposo/congestione: {'SI' if con_riposo else 'NO'}\n", flush=True)
     risultati = {}
     for stagione in ["2025", "2024", "2023"]:
         print(f"=== Stagione di test: {stagione} ===", flush=True)
-        acc, rps_medio, ll, acc_train, n_train, n_test = valuta_stagione(stagione, con_tiri=con_tiri)
+        acc, rps_medio, ll, acc_train, n_train, n_test = valuta_stagione(stagione, con_tiri=con_tiri, con_riposo=con_riposo)
         risultati[stagione] = (acc, rps_medio, ll)
         print(f"  n_train={n_train} n_test={n_test} acc_train={acc_train:.1%}")
         print(f"  HistGradientBoosting: acc={acc:.1%} rps={rps_medio:.4f} logloss={ll:.4f}", flush=True)
