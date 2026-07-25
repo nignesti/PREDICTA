@@ -8,3 +8,8 @@ __pycache__/
 
 # Rigenerabile con "python scarica_elo.py" (7.9MB, causava fallimenti di push su HTTPS)
 elo_storico.csv
+
+# Dataset Understat da Kaggle (~21MB), scaricato manualmente in assenza di scraping
+# diretto praticabile (understat.com/fbref.com bloccano le richieste semplici).
+# Vedi ROADMAP.md per la fonte esatta e come riottenerlo.
+archive/
