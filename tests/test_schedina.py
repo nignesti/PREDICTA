@@ -138,3 +138,68 @@ def test_selezionare_le_piu_sicure_alza_la_probabilita_di_schedina_piena():
 
     assert (schedina.riepiloga_schedina(migliori)["p_tutte"]
             > 3 * schedina.riepiloga_schedina(peggiori)["p_tutte"])
+
+
+# ------------------------------------------------------------
+# Over / Under 2.5
+# ------------------------------------------------------------
+
+def test_over_under_sceglie_l_esito_piu_probabile():
+    assert schedina.analizza_over_under(1.50, 2.60)["pronostico"] == "Over 2.5"
+    assert schedina.analizza_over_under(2.60, 1.50)["pronostico"] == "Under 2.5"
+
+
+def test_over_under_probabilita_sommano_a_uno():
+    r = schedina.analizza_over_under(1.90, 1.95)
+    assert r["prob_over"] + r["prob_under"] == pytest.approx(1.0, abs=1e-9)
+
+
+def test_over_under_toglie_il_margine():
+    # Quote 1.90/1.95: la somma di 1/quota supera 1, il margine va rimosso.
+    r = schedina.analizza_over_under(1.90, 1.95)
+    assert r["margine"] == pytest.approx(1 / 1.90 + 1 / 1.95 - 1, abs=1e-9)
+    assert r["prob_over"] < 1 / 1.90   # la probabilita' vera e' sotto quella grezza
+
+
+def test_over_under_blend_col_modello_sposta_la_previsione():
+    # Mercato quasi in equilibrio, modello convinto dell'Under: con peso_quote
+    # basso deve prevalere il modello, con peso_quote=1 solo il mercato.
+    solo_mercato = schedina.analizza_over_under(1.90, 1.95, prob_over_modello=0.20, peso_quote=1.0)
+    con_modello = schedina.analizza_over_under(1.90, 1.95, prob_over_modello=0.20, peso_quote=0.5)
+
+    assert solo_mercato["pronostico"] == "Over 2.5"
+    assert con_modello["pronostico"] == "Under 2.5"
+    assert con_modello["prob_over"] < solo_mercato["prob_over"]
+
+
+def test_over_under_peso_quote_uno_ignora_il_modello():
+    con = schedina.analizza_over_under(1.80, 2.05, prob_over_modello=0.05, peso_quote=1.0)
+    senza = schedina.analizza_over_under(1.80, 2.05)
+    assert con["prob_over"] == pytest.approx(senza["prob_over"])
+
+
+def test_over_under_rifiuta_quote_non_valide():
+    with pytest.raises(ValueError):
+        schedina.analizza_over_under(1.0, 2.0)
+
+
+def test_schedina_puo_mescolare_1x2_e_over_under():
+    # riepiloga_schedina deve funzionare su una lista mista: e' il motivo per cui
+    # analizza_over_under restituisce lo stesso formato di analizza_partita.
+    selezioni = [
+        schedina.analizza_partita(1.50, 4.00, 7.00),
+        schedina.analizza_over_under(1.70, 2.15),
+        schedina.analizza_partita(1.80, 3.60, 4.50),
+    ]
+    r = schedina.riepiloga_schedina(selezioni)
+    assert r["n_partite"] == 3
+    assert r["moltiplicatore"] == pytest.approx(1.50 * 1.70 * 1.80)
+    assert 0 < r["p_tutte"] < 1
+
+
+def test_over_under_e_spesso_piu_sicuro_dell_1x2():
+    # Con due esiti invece di tre, l'esito piu' probabile parte da una base piu'
+    # alta: e' il motivo per cui includere l'Over/Under migliora la schedina.
+    equilibrata = schedina.analizza_partita(2.80, 3.30, 2.60)      # 1X2 molto incerto
+    ou = schedina.analizza_over_under(1.55, 2.45)                   # Over abbastanza netto
+    assert ou["confidenza"] > equilibrata["confidenza"]

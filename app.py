@@ -31,20 +31,23 @@ st.set_page_config(
 )
 
 SQUADRE = sorted(stats["Squadra"].unique().tolist())
-COLONNE = ["Casa", "Trasferta", "Quota 1", "Quota X", "Quota 2"]
+COLONNE = ["Casa", "Trasferta", "Quota 1", "Quota X", "Quota 2", "Quota Over 2.5", "Quota Under 2.5"]
 
 
 @st.cache_data
 def giornata_di_esempio(n):
     """Ultime n partite dello storico con quote di chiusura note, come
     riga di partenza per chi vuole provare lo strumento subito."""
-    d = df_storico.dropna(subset=["OddsAvgCH", "OddsAvgCD", "OddsAvgCA"]).tail(n)
+    d = df_storico.dropna(subset=["OddsAvgCH", "OddsAvgCD", "OddsAvgCA",
+                                  "OddsCOver25", "OddsCUnder25"]).tail(n)
     return pd.DataFrame({
         "Casa": d["HomeTeam"].to_list(),
         "Trasferta": d["AwayTeam"].to_list(),
         "Quota 1": d["OddsAvgCH"].round(2).to_list(),
         "Quota X": d["OddsAvgCD"].round(2).to_list(),
         "Quota 2": d["OddsAvgCA"].round(2).to_list(),
+        "Quota Over 2.5": d["OddsCOver25"].round(2).to_list(),
+        "Quota Under 2.5": d["OddsCUnder25"].round(2).to_list(),
     })
 
 
@@ -84,6 +87,12 @@ with st.sidebar:
             help="Include solo le partite in cui l'esito piu' probabile supera questa soglia. "
                  "E' la leva piu' importante sulla probabilita' di schedina piena.")
         max_partite = st.slider("Numero massimo di partite", 2, 20, 13, 1)
+        mercati = st.radio(
+            "Esiti ammessi",
+            ["Il piu' sicuro fra 1X2 e Over/Under", "Solo 1X2", "Solo Over/Under 2.5"],
+            help="Con entrambi i mercati disponibili, per ogni partita si sceglie l'esito con la "
+                 "confidenza piu' alta. L'Over/Under offre spesso pronostici piu' solidi dell'1X2, "
+                 "perche' e' una scelta fra due esiti invece che fra tre.")
 
 # ------------------------------------------------------------
 # INTESTAZIONE
@@ -121,6 +130,8 @@ with st.container(border=True):
             "Quota 1": st.column_config.NumberColumn("Quota 1", min_value=1.01, step=0.01, format="%.2f"),
             "Quota X": st.column_config.NumberColumn("Quota X", min_value=1.01, step=0.01, format="%.2f"),
             "Quota 2": st.column_config.NumberColumn("Quota 2", min_value=1.01, step=0.01, format="%.2f"),
+            "Quota Over 2.5": st.column_config.NumberColumn("Over 2.5", min_value=1.01, step=0.01, format="%.2f"),
+            "Quota Under 2.5": st.column_config.NumberColumn("Under 2.5", min_value=1.01, step=0.01, format="%.2f"),
         },
     )
 
@@ -137,10 +148,11 @@ partite, problemi = [], []
 for numero, (_, riga) in enumerate(inserite.iterrows(), start=1):
     casa, trasferta = riga.get("Casa"), riga.get("Trasferta")
     quote = (riga.get("Quota 1"), riga.get("Quota X"), riga.get("Quota 2"))
+    quote_ou = (riga.get("Quota Over 2.5"), riga.get("Quota Under 2.5"))
     casa = None if pd.isna(casa) else casa
     trasferta = None if pd.isna(trasferta) else trasferta
 
-    if not casa and not trasferta and all(pd.isna(q) for q in quote):
+    if not casa and not trasferta and all(pd.isna(q) for q in tuple(quote) + tuple(quote_ou)):
         continue
     if not casa or not trasferta:
         problemi.append(f"riga {numero}: scegli entrambe le squadre")
@@ -164,19 +176,51 @@ for numero, (_, riga) in enumerate(inserite.iterrows(), start=1):
 
     prob = [modello["p_1"], modello["p_X"], modello["p_2"]]
     i = int(np.argmax(prob))
-    mercato = sc.analizza_partita(*[float(q) for q in quote])
+    mercato_1x2 = sc.analizza_partita(*[float(q) for q in quote])
+    base = [modello["p_1_base"], modello["p_X_base"], modello["p_2_base"]]
+    j = int(np.argmax(base))
 
-    partite.append({
+    comune = {
         "casa": casa, "trasferta": trasferta,
-        "pronostico": ESITI[i], "confidenza": prob[i],
-        "quota_pronostico": float(quote[i]),
-        "margine": mercato["margine"],
-        "prob_1": prob[0], "prob_X": prob[1], "prob_2": prob[2],
         "xG_casa": modello["xG_casa"], "xG_trasferta": modello["xG_trasferta"],
-        "pronostico_mercato": mercato["pronostico"], "confidenza_mercato": mercato["confidenza"],
-        "senza_quote": max(modello["p_1_base"], modello["p_X_base"], modello["p_2_base"]),
-        "pronostico_senza_quote": ESITI[int(np.argmax([modello["p_1_base"], modello["p_X_base"], modello["p_2_base"]]))],
-    })
+    }
+
+    # Candidato 1X2: e' gia' il blend calcolato da stima_probabilita.
+    candidati = [dict(comune,
+                      mercato="1X2",
+                      pronostico=ESITI[i], confidenza=prob[i],
+                      quota_pronostico=float(quote[i]),
+                      margine=mercato_1x2["margine"],
+                      solo_mercato=f"{mercato_1x2['pronostico']} ({mercato_1x2['confidenza']:.0%})",
+                      solo_modello=f"{ESITI[j]} ({base[j]:.0%})")]
+
+    # Candidato Over/Under: disponibile solo se sono state inserite le due quote.
+    if not any(pd.isna(q) for q in quote_ou) and all(float(q) > 1.0 for q in quote_ou):
+        ou = sc.analizza_over_under(float(quote_ou[0]), float(quote_ou[1]),
+                                    prob_over_modello=modello["over_25"], peso_quote=peso_quote)
+        ou_mercato = sc.analizza_over_under(float(quote_ou[0]), float(quote_ou[1]))
+        p_over_modello = modello["over_25"]
+        candidati.append(dict(comune,
+                              mercato="Over/Under 2.5",
+                              pronostico=ou["pronostico"], confidenza=ou["confidenza"],
+                              quota_pronostico=ou["quota_pronostico"],
+                              margine=ou["margine"],
+                              solo_mercato=f"{ou_mercato['pronostico']} ({ou_mercato['confidenza']:.0%})",
+                              solo_modello=("Over 2.5" if p_over_modello >= 0.5 else "Under 2.5")
+                                           + f" ({max(p_over_modello, 1 - p_over_modello):.0%})"))
+
+    if mercati == "Solo 1X2":
+        ammessi = [c for c in candidati if c["mercato"] == "1X2"]
+    elif mercati == "Solo Over/Under 2.5":
+        ammessi = [c for c in candidati if c["mercato"] == "Over/Under 2.5"]
+        if not ammessi:
+            problemi.append(f"riga {numero} ({casa}-{trasferta}): mancano le quote Over/Under")
+    else:
+        ammessi = candidati
+
+    if ammessi:
+        # Un solo esito per partita: quello con la confidenza piu' alta fra i mercati ammessi.
+        partite.append(max(ammessi, key=lambda c: c["confidenza"]))
 
 for messaggio in problemi:
     st.warning(f":material/warning: {messaggio}")
@@ -239,12 +283,13 @@ with col_sx:
         st.markdown("**Pronostici selezionati**")
         st.dataframe(pd.DataFrame([{
             "Partita": f"{p['casa']} – {p['trasferta']}",
+            "Mercato": p["mercato"],
             "Esito": p["pronostico"],
             "Confidenza": f"{p['confidenza']:.0%}",
             "Quota": f"{p['quota_pronostico']:.2f}",
             "Gol attesi": f"{p['xG_casa']:.1f} – {p['xG_trasferta']:.1f}",
-            "Solo mercato": f"{p['pronostico_mercato']} ({p['confidenza_mercato']:.0%})",
-            "Solo modello": f"{p['pronostico_senza_quote']} ({p['senza_quote']:.0%})",
+            "Solo mercato": p["solo_mercato"],
+            "Solo modello": p["solo_modello"],
         } for p in selezionate]), hide_index=True, width="stretch")
         st.caption(
             "**Solo mercato** è ciò che dicono le sole quote; **solo modello** è ciò che dicono "
@@ -270,6 +315,7 @@ if escluse:
     with st.expander(f":material/filter_alt: {len(escluse)} partite escluse"):
         st.dataframe(pd.DataFrame([{
             "Partita": f"{p['casa']} – {p['trasferta']}",
+            "Mercato": p["mercato"],
             "Esito più probabile": p["pronostico"],
             "Confidenza": f"{p['confidenza']:.0%}",
         } for p in escluse]), hide_index=True, width="stretch")

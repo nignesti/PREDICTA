@@ -32,6 +32,19 @@ COLONNE_QUOTA_CHIUSURA = {
     "A": ["AvgCA", "B365CA"],
 }
 
+# Quote Over/Under 2.5 gol, apertura e chiusura. Erano gia' nei file grezzi ma
+# non venivano estratte: servono alla pagina Schedina, che permette di scegliere
+# anche l'esito Over/Under oltre all'1X2. Stessa logica a cascata delle quote 1X2
+# (consenso multi-bookmaker, poi Bet365, poi Pinnacle come ultima risorsa).
+COLONNE_OU_APERTURA = {
+    "Over": ["Avg>2.5", "BbAv>2.5", "B365>2.5", "P>2.5"],
+    "Under": ["Avg<2.5", "BbAv<2.5", "B365<2.5", "P<2.5"],
+}
+COLONNE_OU_CHIUSURA = {
+    "Over": ["AvgC>2.5", "B365C>2.5", "PC>2.5"],
+    "Under": ["AvgC<2.5", "B365C<2.5", "PC<2.5"],
+}
+
 for file in sorted(os.listdir(cartella_stagioni)):
     if file.endswith(".txt"):
         percorso = os.path.join(cartella_stagioni, file)
@@ -59,11 +72,21 @@ for file in sorted(os.listdir(cartella_stagioni)):
             colonna_scelta = next((c for c in candidate if c in df.columns), None)
             df[f"OddsAvgC{esito}"] = pd.to_numeric(df[colonna_scelta], errors="coerce") if colonna_scelta else pd.NA
 
+        for esito, candidate in COLONNE_OU_APERTURA.items():
+            colonna_scelta = next((c for c in candidate if c in df.columns), None)
+            df[f"Odds{esito}25"] = pd.to_numeric(df[colonna_scelta], errors="coerce") if colonna_scelta else pd.NA
+
+        for esito, candidate in COLONNE_OU_CHIUSURA.items():
+            colonna_scelta = next((c for c in candidate if c in df.columns), None)
+            df[f"OddsC{esito}25"] = pd.to_numeric(df[colonna_scelta], errors="coerce") if colonna_scelta else pd.NA
+
         # Trova le colonne presenti tra quelle richieste + le quote di consenso appena create
         colonne_presenti = (
             [c for c in colonne_da_tenere if c in df.columns]
             + [f"OddsAvg{e}" for e in COLONNE_QUOTA_MEDIA]
             + [f"OddsAvgC{e}" for e in COLONNE_QUOTA_CHIUSURA]
+            + [f"Odds{e}25" for e in COLONNE_OU_APERTURA]
+            + [f"OddsC{e}25" for e in COLONNE_OU_CHIUSURA]
         )
 
         if "HomeTeam" not in colonne_presenti or "AwayTeam" not in colonne_presenti:
@@ -111,5 +134,7 @@ print(f"Partite con quote Bet365: {df_finale['B365H'].notna().sum() if 'B365H' i
 print(f"Partite con quote Pinnacle: {df_finale['PSH'].notna().sum() if 'PSH' in df_finale.columns else 0}")
 print(f"Partite con quota media di consenso: {df_finale['OddsAvgH'].notna().sum()}")
 print(f"Partite con quota di chiusura (dal 2019): {df_finale['OddsAvgCH'].notna().sum()}")
+print(f"Partite con quota Over/Under 2.5 (apertura): {df_finale['OddsOver25'].notna().sum()}")
+print(f"Partite con quota Over/Under 2.5 (chiusura): {df_finale['OddsCOver25'].notna().sum()}")
 if "Date" in df_finale.columns:
     print(f"Partite con data valida: {df_finale['Date'].notna().sum()} / {len(df_finale)}")

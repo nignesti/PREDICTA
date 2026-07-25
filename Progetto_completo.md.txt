@@ -17,10 +17,12 @@ Dashboard predittiva per partite di Serie A basata su modelli statistici e quote
 ## 📋 Funzionalità
 
 ### Costruttore di schedina (homepage)
-- **Inserisci le quote 1X2** di una giornata (a mano, incollate da un foglio di calcolo, o precaricate da un esempio)
+- **Inserisci le quote** di una giornata: 1X2 e (facoltative) Over/Under 2.5, scegliendo le squadre dai menu a tendina
+- **Due mercati**: per ogni partita il modello valuta sia l'1X2 sia l'Over/Under 2.5 e propone l'esito più solido dei due — l'Over/Under è spesso più affidabile, essendo una scelta fra due esiti invece che fra tre
 - **Selezione automatica** delle partite più solide, con soglia di confidenza regolabile
 - **Probabilità reale** che la schedina esca piena, moltiplicatore e ritorno atteso
 - **Distribuzione completa** degli esiti corretti (Poisson binomiale): quanti ne azzecchi realisticamente, e la probabilità di sbagliarne al massimo una
+- **Confronto per partita** fra ciò che dice il modello statistico e ciò che dicono le quote
 
 La leva principale non è il modello ma **quali partite includi**: misurato su 12.459 partite, una schedina da 13 passa dallo 0,03% (favorito su tutte le partite) al 3,6% (solo partite con confidenza ≥ 70%).
 
@@ -145,7 +147,7 @@ Il dettaglio di ogni esperimento — con numeri, causa probabile del fallimento 
 ```
 PredictA/
 ├── app.py                                  # Homepage: costruttore di schedina
-├── schedina.py                             # Logica schedina: Shin, Poisson binomiale, ritorno atteso
+├── schedina.py                             # Logica schedina: Shin, Over/Under, Poisson binomiale, ritorno atteso
 ├── pronostico.py                           # Logica di previsione sulla singola partita
 ├── modello.py                              # Modulo condiviso: Dixon-Coles, decadimento temporale, Shin, RPS, Elo
 ├── multilega.py                            # Componenti del modello su 5 campionati (test set allargato)
@@ -292,7 +294,7 @@ La dashboard principale permette di scegliere **qualsiasi coppia di squadre** pr
 - **Periodo**: 1993 - 2026 (stagione 2025/26 in corso)
 - **Partite**: 11.534, tutte le 33 stagioni presenti senza duplicati né buchi (verificato: nessuna partita duplicata, nessuna stagione mancante tra la prima e l'ultima — controllo automatico in `tests/test_model.py`)
 - **Squadre**: 53
-- **Colonne**: Date, HomeTeam, AwayTeam, FTHG, FTAG, FTR, Stagione, `OddsAvgH/D/A` (quota di consenso multi-bookmaker in apertura), `OddsAvgCH/CD/CA` (quota di consenso in chiusura, 2.660 partite dal 2019), B365H/D/A, PSH/D/A, oltre a tiri/corner/cartellini quando disponibili (testati e non usati dal modello di produzione)
+- **Colonne**: Date, HomeTeam, AwayTeam, FTHG, FTAG, FTR, Stagione, `OddsAvgH/D/A` (quota di consenso multi-bookmaker in apertura), `OddsAvgCH/CD/CA` (quota di consenso in chiusura, 2.660 partite dal 2019), `OddsOver25`/`OddsUnder25` e `OddsCOver25`/`OddsCUnder25` (Over/Under 2.5 gol, 8.552 e 2.660 partite), B365H/D/A, PSH/D/A, oltre a tiri/corner/cartellini quando disponibili (testati e non usati dal modello di produzione)
 
 ---
 

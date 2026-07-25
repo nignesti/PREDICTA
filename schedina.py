@@ -31,6 +31,7 @@ import numpy as np
 from modello import probabilita_shin
 
 ESITI = ("1", "X", "2")
+ESITI_OU = ("Over 2.5", "Under 2.5")
 
 
 def analizza_partita(quota_1, quota_x, quota_2):
@@ -51,6 +52,39 @@ def analizza_partita(quota_1, quota_x, quota_2):
         "confidenza": probabilita[i],
         "quota_pronostico": quote[i],
         "margine": sum(1.0 / q for q in quote) - 1.0,
+        "mercato": "1X2",
+    }
+
+
+def analizza_over_under(quota_over, quota_under, prob_over_modello=None, peso_quote=1.0):
+    """Pronostico Over/Under 2.5 gol per una partita.
+
+    quota_over / quota_under: quote decimali offerte sui due esiti.
+    prob_over_modello: probabilita' di Over secondo il modello statistico
+        (dalla matrice Poisson-Dixon-Coles). Se fornita, viene fusa con il
+        mercato secondo peso_quote, con la stessa logica del blend 1X2.
+
+    Restituisce un dict nello stesso formato di analizza_partita, cosi' che una
+    schedina possa mescolare liberamente pronostici 1X2 e Over/Under."""
+    quote = [float(quota_over), float(quota_under)]
+    if any(q <= 1.0 for q in quote):
+        raise ValueError("Le quote decimali devono essere maggiori di 1")
+
+    p_mercato = probabilita_shin(quote)
+    p_over = p_mercato[0]
+    if prob_over_modello is not None:
+        p_over = (1 - peso_quote) * float(prob_over_modello) + peso_quote * p_mercato[0]
+    p_under = 1.0 - p_over
+
+    i = 0 if p_over >= p_under else 1
+    return {
+        "prob_over": p_over, "prob_under": p_under,
+        "pronostico": ESITI_OU[i],
+        "confidenza": (p_over, p_under)[i],
+        "quota_pronostico": quote[i],
+        "margine": sum(1.0 / q for q in quote) - 1.0,
+        "mercato": "Over/Under 2.5",
+        "prob_over_mercato": p_mercato[0],
     }
 
 
