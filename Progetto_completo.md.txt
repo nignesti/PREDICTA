@@ -239,7 +239,7 @@ Organizzati per priorità (impatto atteso sull'accuratezza) e fattibilità (faci
 
 | Dato/Feature | Fonte specifica | Fattibilità | Impatto atteso | Come entra nel modello |
 |---|---|---|---|---|
-| **Modello Bayesiano gerarchico** (Baio & Blangiardo 2010) | Libreria `PyMC` | Bassa (competenze MCMC) | Alto, specie per neopromosse | Sostituisce il layer statistico con partial pooling |
+| **Modello Bayesiano gerarchico** (Baio & Blangiardo 2010) | `PyMC` non installabile qui, sostituito con MAP via scipy | Bassa | Testato: **negativo**, vedi Fase 3 | Sostituisce il layer statistico con partial pooling |
 | **Formazioni/infortuni in tempo reale** | API-Football a pagamento | Bassa-media | Alto solo "a ridosso" | Feature runtime, non backtestabile facilmente |
 | **Ensemble stacking** | Nessun dato esterno | Media | Alto | Meta-learner (regressione logistica) out-of-fold |
 | **Multi-campionato** | football-data.co.uk (altre leghe) | Alta come dato, media impatto | Medio | Serve un prior per lega, altrimenti rischia di peggiorare (vedi nota sotto) |
@@ -281,7 +281,7 @@ Organizzati per priorità (impatto atteso sull'accuratezza) e fattibilità (faci
 
 ### Fase 3 — Avanzato (mesi)
 
-1. Modello Bayesiano gerarchico (Baio & Blangiardo) con partial pooling per gestire correttamente neopromosse/campioni piccoli
+1. ~~Modello Bayesiano gerarchico (Baio & Blangiardo) con partial pooling~~ — **fatto, risultato negativo.** `PyMC` non installabile (llvmlite non compila su Python 3.14 qui): sostituito con stima MAP equivalente via massima verosimiglianza penalizzata (`prototipo_bayesiano_gerarchico.py`), stesso effetto di shrinkage verso la media di lega per le squadre con pochi dati, ri-adattato ogni ~10 partite. Validato sulle 3 stagioni indipendenti: 54.35% acc / 0.1883 RPS, contro 55.22%/0.1885 della stessa configurazione con storico/forma da gol reali — peggiore in accuratezza. Causa probabile: il refit periodico con forte regolarizzazione si muove troppo lentamente per catturare la "forma recente" che la media mobile attuale cattura bene.
 2. Ensemble stacking finale: Poisson-Dixon-Coles + Elo/pi-ratings + XGBoost + quote di mercato, meta-learner allenato out-of-fold. Raffinamento da una revisione esterna: blend condizionato al contesto (più peso al modello statistico con segnali forti di mismatch), non un peso fisso.
 3. Estensione multi-campionato per aumentare il volume dati della componente ML — con un prior per lega, altrimenti un modello ML tenderebbe a imparare "vince sempre la casa" a prescindere dal campionato, annullando le differenze specifiche tra leghe
 4. Formazioni/infortuni via API-Football (richiede piano a pagamento per storico affidabile) solo se il caso d'uso si sposta da "dashboard esplorativa" a "previsione a ridosso del match reale"

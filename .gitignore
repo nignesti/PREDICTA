@@ -13,3 +13,7 @@ elo_storico.csv
 # diretto praticabile (understat.com/fbref.com bloccano le richieste semplici).
 # Vedi ROADMAP.md per la fonte esatta e come riottenerlo.
 archive/
+
+# Rigenerabile con "python scarica_altre_leghe.py" (dati grezzi di altre leghe
+# per l'estensione multi-campionato, Fase 3 punto 3)
+altre_leghe/
