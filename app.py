@@ -64,16 +64,21 @@ with st.sidebar:
     st.markdown("### :material/tune: Pesi del modello")
     with st.container(border=True):
         peso_forma = st.slider(
-            "Forma recente", 0.0, 1.0, 0.15, 0.05,
-            help="Rendimento nelle ultime 3 partite di ciascuna squadra.")
+            "Forma recente", 0.0, 1.0, 0.0, 0.05,
+            help="Rendimento nelle ultime 3 partite di ciascuna squadra. Default 0: nella ricerca "
+                 "su 2.115 configurazioni (ricerca_configurazione.py) il tasso di successo dei "
+                 "pronostici cala in modo monotono al crescere di questo peso.")
         peso_scontri = st.slider(
-            "Scontri diretti", 0.0, 0.5, 0.15, 0.05,
-            help="Media gol dei precedenti fra queste due squadre.")
+            "Scontri diretti", 0.0, 0.5, 0.0, 0.05,
+            help="Media gol dei precedenti fra queste due squadre. Default 0 per la stessa ragione "
+                 "della forma: ogni peso assegnato peggiora sia accuratezza sia calibrazione.")
         peso_quote = st.slider(
-            "Quote bookmaker", 0.0, 1.0, 0.60, 0.05,
-            help="Peso delle quote che inserisci. Misurato su 12.459 partite di 5 campionati, "
-                 "il solo mercato (peso 1.0) e' risultato piu' accurato del blend: qui il default "
-                 "lascia contribuire tutte le componenti, ma puoi confrontare i due nella tabella.")
+            "Quote bookmaker", 0.0, 1.0, 1.0, 0.05,
+            help="Peso delle quote che inserisci. Default 1.0: e' la configurazione migliore fra le "
+                 "2.115 provate su 12.421 partite di 5 campionati, sia sull'1X2 sia sull'Over/Under. "
+                 "Simulando 255 giornate reali, una schedina da 13 con questo peso e' uscita piena "
+                 "6 volte contro le 2 del vecchio default 0.60. Gli altri cursori restano liberi "
+                 "per esplorare, e la tabella mostra sempre cosa dicono separatamente modello e mercato.")
         peso_storico = 1 - peso_forma - peso_scontri - peso_quote
         if peso_storico < 0:
             st.error(":material/error: La somma dei pesi supera il 100%")
@@ -91,8 +96,9 @@ with st.sidebar:
             "Esiti ammessi",
             ["Il piu' sicuro fra 1X2 e Over/Under", "Solo 1X2", "Solo Over/Under 2.5"],
             help="Con entrambi i mercati disponibili, per ogni partita si sceglie l'esito con la "
-                 "confidenza piu' alta. L'Over/Under offre spesso pronostici piu' solidi dell'1X2, "
-                 "perche' e' una scelta fra due esiti invece che fra tre.")
+                 "confidenza piu' alta. E' l'opzione migliore delle tre: su 255 giornate simulate "
+                 "ha prodotto 6 schedine piene da 13 contro 5 del solo 1X2 e 1 del solo Over/Under. "
+                 "Avere due mercati per partita allarga il paniere di pronostici ad alta confidenza.")
 
 # ------------------------------------------------------------
 # INTESTAZIONE

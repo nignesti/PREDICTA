@@ -202,6 +202,58 @@ Monotòno: non esiste un ottimo intermedio da cercare. **Default portato a `quot
 
 **Conclusione.** Il mercato delle scommesse sui cinque campionati principali è efficiente, e la quota di chiusura convertita con Shin è il miglior previsore 1X2 a disposizione. Le medie sui gol non aggiungono informazione: la sottraggono. L'effetto è piccolo in valore assoluto (~0.3% relativo sull'RPS), quindi il modello non è un disastro — è solo un po' peggio di non averlo. Ma la direzione ora è certa, dove prima non lo era.
 
+## Over/Under 2.5 e ricerca della configurazione ottimale ✅
+
+### L'Over/Under: ipotesi motivata, e falsificata
+
+Ipotesi: il modello Dixon-Coles **modella i gol**, quindi l'Over/Under 2.5 e' la sua uscita nativa, mentre l'1X2 lo obbliga a convertire i gol in "chi vince" buttando via informazione (un 3-0 e un 1-0 sono lo stesso esito). In piu' il mercato Over/Under muove meno volume. Era la prima ipotesi del progetto con una ragione **strutturale** per funzionare.
+
+Misurata su 12.421 partite di 5 campionati (`valida_over_under.py`, con `protocollo.confronta_binario`: su due esiti l'RPS coincide col Brier):
+
+| Confronto | Δ Brier (IC95%) | Δ acc | Verdetto |
+|---|---|---:|---|
+| **Modello statistico vs mercato** | **+0.01119 [+0.00931, +0.01306]** | −2.95 pp | ❌ **PEGGIO** in 5 leghe su 5 |
+
+**Falsificata, e nettamente**: l'effetto e' circa venti volte piu' marcato di quello misurato sull'1X2, e il peso ottimale delle quote resta 1.00.
+
+Il motivo per cui il ragionamento era sbagliato: il totale gol dipende da **λ_casa + λ_trasferta**, quindi gli errori sulle due stime di xG **si sommano**. Nell'1X2 conta soprattutto la loro differenza, e gli errori in parte si compensano. Il mercato non ha questo problema perche' prezza il totale direttamente invece di stimare due quantita' separate.
+
+**Una parte del ragionamento era pero' giusta e resta utile**: sulle stesse partite il mercato Over/Under e' molto piu' accurato del mercato 1X2 (**59,25% contro 53,93%**, +5,3 punti), perche' sceglie fra due esiti invece che fra tre. Includere l'Over/Under nella schedina e' quindi giusto — non perche' il modello sappia prevederlo, ma perche' *il mercato* lo prevede meglio.
+
+### Ricerca esaustiva della configurazione
+
+`ricerca_configurazione.py` esplora **2.115 combinazioni** — peso forma, peso scontri, peso quote, rho, mercati ammessi, soglia di confidenza — sulle stesse 12.421 partite, con il calcolo della matrice dei punteggi vettorizzato su tutte le partite in un colpo (senza il quale la ricerca non sarebbe praticabile).
+
+Effetto dei singoli parametri sul tasso di successo dei pronostici selezionati:
+
+| Parametro | Andamento |
+|---|---|
+| **peso quote** | monotono crescente: 0.70 → 71,3%, 0.90 → 72,3%, **1.00 → 72,5%** |
+| **peso forma** | monotono decrescente: **0.00 → 71,6%**, 0.15 → 71,0%, 0.30 → 70,4% |
+| **peso scontri** | monotono decrescente: **0.00 → 71,4%**, 0.20 → 71,1% |
+| **rho** | irrilevante all'ottimo — con peso quote 1.00 il modello ha peso zero |
+| **mercati** | entrambi > solo 1X2 > solo Over/Under, alle soglie alte |
+
+### Verifica finale: simulazione su giornate reali
+
+La strategia dell'app non e' "tutte le partite sopra soglia" ma "le migliori N per confidenza". Simulata su **255 settimane reali**:
+
+| Configurazione | Schedine da 13 | Piene | Reale | Dichiarata |
+|---|---:|---:|---:|---:|
+| **quote=1.00, entrambi i mercati** | 255 | **6** | **2,35%** | 1,57% |
+| quote=1.00, solo 1X2 | 255 | 5 | 1,96% | 1,22% |
+| quote=1.00, solo Over/Under | 255 | 1 | 0,39% | 0,56% |
+| Vecchio default app (0.15/0.15/0.60) | 255 | 2 | 0,78% | 1,79% |
+
+Due conclusioni:
+
+1. La configurazione ottimale **triplica** le schedine piene rispetto al vecchio default (6 contro 2), a parita' di strategia e partite.
+2. Il vecchio default era **sopravvalutato**: dichiarava 1,79% e consegnava 0,78%. L'ottimale dichiara 1,57% e consegna 2,35% — conservativo. Per uno strumento che serve a decidere, promettere il doppio di quanto si mantiene e' il difetto piu' grave dei due.
+
+**Adottato in `app.py`**: `forma=0`, `scontri=0`, `quote=1.00`, entrambi i mercati. I cursori restano liberi per esplorare.
+
+*Avvertenza sul campione: 6 schedine piene contro 2 e' un confronto su pochi eventi. Il numero stabile e' la media di pronostici corretti per schedina (9,5 contro 9,2 su 13), che va nella stessa direzione, insieme al segno del bias di calibrazione.*
+
 ### Cosa resta aperto
 
 **La priorità non è una feature: è il campione.** La Fase 0 ha mostrato che gli effetti in gioco richiedono 15-65 stagioni di test per essere misurati, mentre la Serie A ne produce una all'anno. Finché il campione resta questo, aggiungere feature significa scegliere a caso quali tenere.

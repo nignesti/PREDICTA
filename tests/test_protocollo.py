@@ -141,3 +141,37 @@ def test_stagioni_test_copre_le_sette_stagioni_con_quote_di_chiusura():
     df = pd.read_csv("serie_a.csv")
     con_chiusura = sorted(df[df["OddsAvgCH"].notna()]["Stagione"].astype(str).unique())
     assert sorted(protocollo.STAGIONI_TEST) == con_chiusura
+
+
+# ------------------------------------------------------------
+# Mercati a due esiti
+# ------------------------------------------------------------
+
+def test_binario_riconosce_il_previsore_migliore():
+    rng = np.random.default_rng(7)
+    esiti = rng.random(2000) < 0.52
+    # forte: vicino alla verita'; debole: quasi sempre 0.5
+    forte = np.where(esiti, 0.80, 0.20)
+    debole = np.full(2000, 0.5)
+    e = protocollo.confronta_binario("forte", forte, "debole", debole, esiti)
+    assert e.verdetto == "MEGLIO"
+    assert e.ic_rps[1] < 0
+
+
+def test_binario_dichiara_indistinguibili_due_previsori_uguali():
+    rng = np.random.default_rng(8)
+    esiti = rng.random(2000) < 0.5
+    p = np.full(2000, 0.5)
+    e = protocollo.confronta_binario("a", p, "b", p.copy(), esiti)
+    assert e.verdetto == "INDISTINGUIBILE"
+
+
+def test_brier_previsione_perfetta_e_pessima():
+    assert protocollo.brier_per_partita([1.0], [True]) == pytest.approx([0.0])
+    assert protocollo.brier_per_partita([0.0], [True]) == pytest.approx([1.0])
+    assert protocollo.brier_per_partita([0.5], [True]) == pytest.approx([0.25])
+
+
+def test_binario_lunghezze_diverse_falliscono():
+    with pytest.raises(ValueError):
+        protocollo.confronta_binario("a", [0.5], "b", [0.5, 0.5], [True, False])

@@ -21,3 +21,5 @@ altre_leghe/
 # Componenti multi-lega precalcolate (~25 min di calcolo, rigenerabile con
 # "python valida_multilega.py --ricalcola"): cache, non dato sorgente
 componenti_multilega.csv.gz
+componenti_multilega_ou.csv.gz
+ricerca_configurazione.csv

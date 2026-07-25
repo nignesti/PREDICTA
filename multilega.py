@@ -57,6 +57,12 @@ CASCATA_APERTURA = {"H": ["AvgH", "BbAvH", "B365H"], "D": ["AvgD", "BbAvD", "B36
                     "A": ["AvgA", "BbAvA", "B365A"]}
 CASCATA_CHIUSURA = {"H": ["AvgCH", "B365CH"], "D": ["AvgCD", "B365CD"], "A": ["AvgCA", "B365CA"]}
 
+# Over/Under 2.5 gol: stessa logica a cascata, apertura e chiusura.
+CASCATA_OU_APERTURA = {"Over25": ["Avg>2.5", "BbAv>2.5", "B365>2.5", "P>2.5"],
+                       "Under25": ["Avg<2.5", "BbAv<2.5", "B365<2.5", "P<2.5"]}
+CASCATA_OU_CHIUSURA = {"COver25": ["AvgC>2.5", "B365C>2.5", "PC>2.5"],
+                       "CUnder25": ["AvgC<2.5", "B365C<2.5", "PC<2.5"]}
+
 
 def stagione_da_data(date):
     """Stagione sportiva (agosto-maggio) etichettata con l'anno di inizio, la
@@ -94,6 +100,9 @@ def carica_lega(codice):
         for esito, candidate in CASCATA_CHIUSURA.items():
             colonna = next((c for c in candidate if c in df.columns), None)
             df[f"OddsAvgC{esito}"] = pd.to_numeric(df[colonna], errors="coerce") if colonna else np.nan
+        for nome, candidate in {**CASCATA_OU_APERTURA, **CASCATA_OU_CHIUSURA}.items():
+            colonna = next((c for c in candidate if c in df.columns), None)
+            df[f"Odds{nome}"] = pd.to_numeric(df[colonna], errors="coerce") if colonna else np.nan
         df["Date"] = pd.to_datetime(df["Date"], dayfirst=True, errors="coerce")
         df["FTHG"] = pd.to_numeric(df["FTHG"], errors="coerce")
         df["FTAG"] = pd.to_numeric(df["FTAG"], errors="coerce")
@@ -102,6 +111,16 @@ def carica_lega(codice):
     lega = pd.concat(pezzi, ignore_index=True).sort_values("Date", kind="stable").reset_index(drop=True)
     lega["Stagione"] = stagione_da_data(lega["Date"])
     return lega
+
+
+def _probabilita_over_under(riga):
+    """Probabilita' di (Over 2.5, Under 2.5) implicite nelle quote, con la stessa
+    cascata chiusura -> apertura usata per l'1X2. None se le quote mancano."""
+    for prefisso in ("OddsC", "Odds"):
+        q = [riga.get(f"{prefisso}Over25"), riga.get(f"{prefisso}Under25")]
+        if all(pd.notna(v) for v in q) and all(float(v) > 1.0 for v in q):
+            return probabilita_shin([float(v) for v in q])
+    return None
 
 
 def _probabilita_quote(riga):
@@ -157,7 +176,9 @@ def componenti_lega(df_lega, stagioni_test, codice_lega=""):
             xg_c_sc, xg_t_sc, scontri_validi = xg_cs, xg_ts, False
 
         quote = _probabilita_quote(riga)
+        quote_ou = _probabilita_over_under(riga)
         esito = "1" if riga["FTHG"] > riga["FTAG"] else ("X" if riga["FTHG"] == riga["FTAG"] else "2")
+        over_reale = (riga["FTHG"] + riga["FTAG"]) > 2.5
 
         componenti.append({
             "xG_casa_storico": xg_cs, "xG_trasf_storico": xg_ts,
@@ -169,6 +190,9 @@ def componenti_lega(df_lega, stagioni_test, codice_lega=""):
             "prob_X_quote": quote[1] if quote else 0.0,
             "prob_2_quote": quote[2] if quote else 0.0,
             "elo_casa": None, "elo_trasferta": None,
+            "quote_ou_presenti": quote_ou is not None,
+            "prob_over_mercato": quote_ou[0] if quote_ou else 0.0,
+            "esito_over": bool(over_reale),
             "esito": esito, "stagione": str(int(riga["Stagione"])),
             "lega": codice_lega, "data": data,
         })
@@ -232,3 +256,36 @@ def raccogli_tutte(stagioni_test, leghe=None, verbose=True):
             print(f" {len(comp)} partite ({con_quote} con quote)", flush=True)
         tutte.extend(comp)
     return tutte
+
+
+def probabilita_over_modello(componenti, peso_forma=PESO_FORMA, peso_scontri=PESO_SCONTRI,
+                             peso_quote=0.0, rho=RHO):
+    """Probabilita' di Over 2.5 secondo il modello statistico.
+
+    E' l'uscita NATIVA del modello Dixon-Coles: si legge sommando le celle della
+    matrice dei punteggi con piu' di 2 gol totali, senza la perdita di
+    informazione che comporta convertire i gol in "chi vince". Il blend con il
+    mercato Over/Under (peso_quote) avviene qui, non dentro l'xG."""
+    risultati = []
+    for comp in componenti:
+        ps = peso_scontri if comp["scontri_validi"] else 0.0
+        peso_storico = max(0.0, 1 - peso_forma - ps)
+        peso_xg = peso_storico + peso_forma + ps
+        if peso_xg > 0:
+            xg_casa = (peso_storico * comp["xG_casa_storico"] + peso_forma * comp["xG_casa_forma"]
+                       + ps * comp["xG_casa_scontri"]) / peso_xg
+            xg_trasf = (peso_storico * comp["xG_trasf_storico"] + peso_forma * comp["xG_trasf_forma"]
+                        + ps * comp["xG_trasf_scontri"]) / peso_xg
+        else:
+            xg_casa, xg_trasf = comp["xG_casa_storico"], comp["xG_trasf_storico"]
+
+        esiti = esiti_da_matrice(distribuzione_punteggi(max(0.05, xg_casa), max(0.05, xg_trasf), rho=rho))
+        p_over = float(esiti["over_25"])
+        if peso_quote > 0 and comp["quote_ou_presenti"]:
+            p_over = (1 - peso_quote) * p_over + peso_quote * comp["prob_over_mercato"]
+        risultati.append([p_over, 1.0 - p_over])
+    return risultati
+
+
+def probabilita_over_mercato(componenti):
+    return [[c["prob_over_mercato"], 1.0 - c["prob_over_mercato"]] for c in componenti]

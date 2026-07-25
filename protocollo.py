@@ -194,3 +194,61 @@ def riepiloga(esiti):
             print(f"  {e.nome_a} vs {e.nome_b}:")
             print(f"    su RPS:         {formatta(n_rps)}")
             print(f"    su accuratezza: {formatta(n_acc)}")
+
+
+# ------------------------------------------------------------
+# Mercati a due esiti (Over/Under, Goal/NoGoal, doppia chance)
+# ------------------------------------------------------------
+
+def brier_per_partita(prob_positivo, esiti):
+    """Brier score di ogni previsione binaria. Su due soli esiti l'RPS coincide
+    con il Brier, quindi resta la stessa famiglia di metrica usata per l'1X2:
+    proper scoring rule, sensibile alla calibrazione e non solo alla scelta."""
+    p = np.asarray([float(x) for x in prob_positivo])
+    y = np.asarray([1.0 if bool(e) else 0.0 for e in esiti])
+    return (p - y) ** 2
+
+
+def confronta_binario(nome_a, prob_a, nome_b, prob_b, esiti, rng=None):
+    """Confronto fra due previsori su un mercato a due esiti.
+
+    prob_a / prob_b: probabilita' dell'esito "positivo" (es. Over 2.5).
+    esiti: sequenza di booleani (True = esito positivo verificato).
+
+    Stesso impianto di `confronta`: Brier con bootstrap appaiato come criterio
+    primario, accuratezza con McNemar come metrica descrittiva."""
+    esiti = [bool(e) for e in esiti]
+    n = len(esiti)
+    if not (len(prob_a) == len(prob_b) == n):
+        raise ValueError("Le due configurazioni devono coprire le stesse partite")
+    if n == 0:
+        raise ValueError("Nessuna partita da confrontare")
+
+    y = np.array(esiti)
+    ok_a = (np.asarray([float(x) for x in prob_a]) >= 0.5) == y
+    ok_b = (np.asarray([float(x) for x in prob_b]) >= 0.5) == y
+
+    solo_a, solo_b = int((ok_a & ~ok_b).sum()), int((ok_b & ~ok_a).sum())
+    discordanti = solo_a + solo_b
+    p_mcnemar = binomtest(solo_a, discordanti, 0.5).pvalue if discordanti else 1.0
+    if p_mcnemar >= ALFA:
+        verdetto_acc = "indistinguibile"
+    else:
+        verdetto_acc = "meglio" if solo_a > solo_b else "peggio"
+
+    b_a, b_b = brier_per_partita(prob_a, esiti), brier_per_partita(prob_b, esiti)
+    differenza = b_a - b_b
+    rng = rng or np.random.default_rng(12345)
+    idx = rng.integers(0, n, size=(N_BOOTSTRAP, n))
+    boot = differenza[idx].mean(axis=1)
+    ic = tuple(np.percentile(boot, [100 * ALFA / 2, 100 * (1 - ALFA / 2)]))
+
+    if ic[0] <= 0 <= ic[1]:
+        verdetto = "INDISTINGUIBILE"
+    elif ic[1] < 0:
+        verdetto = "MEGLIO"
+    else:
+        verdetto = "PEGGIO"
+
+    return EsitoConfronto(nome_a, nome_b, n, ok_a.mean(), ok_b.mean(), solo_a, solo_b,
+                          p_mcnemar, b_a.mean(), b_b.mean(), ic, verdetto, verdetto_acc)

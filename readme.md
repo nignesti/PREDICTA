@@ -172,6 +172,8 @@ PredictA/
 ├── valida_significativita.py               # Test di significativita' (McNemar + bootstrap RPS)
 ├── valida_fase0_rivalutazione.py           # Fase 0: rivalutazione ensemble stacking / gradient boosting
 ├── valida_fase0_multiliga.py               # Fase 0: rivalutazione multi-campionato
+├── valida_over_under.py                    # Il modello batte il mercato sull'Over/Under? (no)
+├── ricerca_configurazione.py               # Ricerca esaustiva: 2.115 configurazioni confrontate
 ├── valida_understat.py                     # Validazione: xG reali di Understat (non adottata)
 ├── prototipo_gradient_boosting.py          # Prototipo ML (+ flag --con-tiri, --con-riposo, --con-motivazione)
 ├── prototipo_gradient_boosting_multiliga.py# Prototipo ML con training multi-campionato
