@@ -458,3 +458,46 @@ def test_xg_da_elo_calibrato_rating_mancante_usa_elo_diff_zero():
     # deve ricadere su elo_diff=0.
     xg_casa, xg_trasferta = modello.xg_da_elo_calibrato(1500.0, np.nan, modello_casa, modello_trasferta)
     assert np.isfinite(xg_casa) and np.isfinite(xg_trasferta)
+
+
+def test_stima_probabilita_usa_le_quote_della_partita_se_fornite():
+    # La schedina passa le quote dell'incontro da prevedere: devono essere quelle
+    # a entrare nel blend, non la media dei precedenti scontri diretti (che si
+    # riferiscono ad anni e stati di forma diversi).
+    squadre = ["Milan", "Inter"]
+    if not all(s in set(pronostico.stats["Squadra"]) for s in squadre):
+        pytest.skip("Squadre di riferimento non presenti nel dataset")
+
+    favorita_casa = pronostico.stima_probabilita(
+        pronostico.df, pronostico.stats, "Milan", "Inter",
+        peso_forma=0.0, peso_scontri=0.0, peso_quote=1.0, quote_partita=(1.30, 5.00, 9.00))
+    favorita_ospite = pronostico.stima_probabilita(
+        pronostico.df, pronostico.stats, "Milan", "Inter",
+        peso_forma=0.0, peso_scontri=0.0, peso_quote=1.0, quote_partita=(9.00, 5.00, 1.30))
+
+    # Con peso_quote=1 la previsione deve seguire le quote fornite, non i precedenti.
+    assert favorita_casa["p_1"] > 0.65
+    assert favorita_ospite["p_2"] > 0.65
+
+
+def test_stima_probabilita_le_quote_fornite_non_cambiano_l_xg():
+    # L'xG dipende da squadre e storico, non dalle quote: le quote entrano solo
+    # nel blend finale sulle probabilita'. Se cambiassero l'xG, i gol attesi
+    # mostrati in pagina non descriverebbero piu' le squadre.
+    a = pronostico.stima_probabilita(pronostico.df, pronostico.stats, "Milan", "Inter",
+                                     0.15, 0.15, 0.60, quote_partita=(2.50, 3.40, 2.70))
+    b = pronostico.stima_probabilita(pronostico.df, pronostico.stats, "Milan", "Inter",
+                                     0.15, 0.15, 0.60, quote_partita=(1.40, 4.50, 8.00))
+    assert a["xG_casa"] == pytest.approx(b["xG_casa"])
+    assert a["xG_trasferta"] == pytest.approx(b["xG_trasferta"])
+    # ...ma le probabilita' finali si', altrimenti le quote non entrerebbero affatto.
+    assert a["p_1"] != pytest.approx(b["p_1"])
+
+
+def test_stima_probabilita_quote_non_valide_ricadono_sugli_scontri_diretti():
+    # Quote incomplete o assurde non devono far esplodere il calcolo: si ricade
+    # sul comportamento precedente invece di produrre probabilita' senza senso.
+    r = pronostico.stima_probabilita(pronostico.df, pronostico.stats, "Milan", "Inter",
+                                     0.15, 0.15, 0.60, quote_partita=(1.0, None, 3.0))
+    assert r is not None
+    assert r["p_1"] + r["p_X"] + r["p_2"] == pytest.approx(1.0, abs=1e-9)

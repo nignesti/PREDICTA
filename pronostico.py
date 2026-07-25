@@ -107,9 +107,17 @@ def scontri_diretti(df, squadra1, squadra2, ultimi_n=10):
 stats = stats_pesate_squadre(df, data_riferimento=df["Date"].max(), half_life_giorni=EMIVITA_GIORNI)
 
 def stima_probabilita(df, stats, squadra_casa, squadra_trasferta,
-                      peso_forma=0.0, peso_scontri=0.0, peso_quote=1.0):
+                      peso_forma=0.0, peso_scontri=0.0, peso_quote=1.0,
+                      quote_partita=None):
     """
-    Combina: storico + forma + scontri diretti + quote dei bookmaker
+    Combina: storico + forma + scontri diretti + quote dei bookmaker.
+
+    quote_partita: tripla (quota_1, quota_X, quota_2) della partita da prevedere.
+    Se fornita, e' quella che entra nel blend — il caso corretto, perche' descrive
+    proprio l'incontro in questione. Se omessa, si ripiega sulla media delle quote
+    dei precedenti scontri diretti, che e' un surrogato molto piu' debole: quei
+    prezzi si riferiscono ad anni diversi e a stati di forma diversi delle due
+    squadre.
     """
     casa = stats[stats["Squadra"] == squadra_casa]
     trasferta = stats[stats["Squadra"] == squadra_trasferta]
@@ -166,7 +174,12 @@ def stima_probabilita(df, stats, squadra_casa, squadra_trasferta,
     colonne_quota = ("OddsAvgH", "OddsAvgD", "OddsAvgA") if "OddsAvgH" in df.columns else ("B365H", "B365D", "B365A")
     colonne_chiusura = ("OddsAvgCH", "OddsAvgCD", "OddsAvgCA")
 
-    if colonne_quota[0] in df.columns and scontri[0] is not None:
+    if quote_partita is not None and all(q is not None and float(q) > 1.0 for q in quote_partita):
+        # Quote della partita da prevedere: nessun surrogato, nessuna media su
+        # precedenti di anni diversi.
+        prob_1_quote, prob_X_quote, prob_2_quote = probabilita_shin([float(q) for q in quote_partita])
+        quote_presenti = True
+    elif colonne_quota[0] in df.columns and scontri[0] is not None:
         _, _, _, _, _, tabella_scontri = scontri
         if colonne_quota[0] in tabella_scontri.columns:
             # Gli scontri diretti includono ENTRAMBI gli orientamenti (Milan-Inter e
