@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import app
+import pronostico
 import backtesting as bt
 import modello
 
@@ -36,7 +36,7 @@ def partite_miste():
 def test_calcola_forma_usa_le_ultime_n_partite_in_ordine_cronologico(partite_miste):
     # Regressione: la vecchia implementazione concatenava le ultime N partite in casa
     # con le ultime N in trasferta e tagliava la coda, finendo per usare solo le trasferte.
-    _, _, _, _, risultati, gol_fatti = app.calcola_forma(partite_miste, "A", ultime_n=5)
+    _, _, _, _, risultati, gol_fatti = pronostico.calcola_forma(partite_miste, "A", ultime_n=5)
 
     attese = _partite_squadra(partite_miste, "A").tail(5)
     gol_fatti_attesi = _gol_fatti_attesi(attese, "A")
@@ -49,7 +49,7 @@ def test_calcola_forma_usa_le_ultime_n_partite_in_ordine_cronologico(partite_mis
 
 
 def test_calcola_forma_nessuna_partita_restituisce_none(partite_miste):
-    risultato = app.calcola_forma(partite_miste, "SquadraInesistente", ultime_n=5)
+    risultato = pronostico.calcola_forma(partite_miste, "SquadraInesistente", ultime_n=5)
     assert risultato == (None, None, None, None, [], [])
 
 
@@ -59,7 +59,7 @@ def test_scontri_diretti_conta_correttamente_vittorie_pareggi():
         {"HomeTeam": "B", "AwayTeam": "A", "FTHG": 0, "FTAG": 0},  # pareggio
         {"HomeTeam": "A", "AwayTeam": "B", "FTHG": 1, "FTAG": 3},  # B vince in trasferta
     ])
-    gol_fatti_a, gol_subiti_a, vittorie_a, pareggi, vittorie_b, tabella = app.scontri_diretti(df, "A", "B")
+    gol_fatti_a, gol_subiti_a, vittorie_a, pareggi, vittorie_b, tabella = pronostico.scontri_diretti(df, "A", "B")
 
     assert vittorie_a == 1
     assert pareggi == 1
@@ -71,16 +71,16 @@ def test_scontri_diretti_conta_correttamente_vittorie_pareggi():
 
 def test_scontri_diretti_nessun_precedente_restituisce_none():
     df = pd.DataFrame([{"HomeTeam": "A", "AwayTeam": "C", "FTHG": 1, "FTAG": 0}])
-    risultato = app.scontri_diretti(df, "A", "B")
+    risultato = pronostico.scontri_diretti(df, "A", "B")
     assert risultato == (None, None, None, None, None, None)
 
 
 def test_stima_probabilita_pesi_oltre_1_vengono_normalizzati_non_azzerati():
-    squadre = app.stats["Squadra"].unique()
+    squadre = pronostico.stats["Squadra"].unique()
     squadra_casa, squadra_trasferta = squadre[0], squadre[1]
 
-    risultato = app.stima_probabilita(
-        app.df, app.stats, squadra_casa, squadra_trasferta,
+    risultato = pronostico.stima_probabilita(
+        pronostico.df, pronostico.stats, squadra_casa, squadra_trasferta,
         peso_forma=1.0, peso_scontri=0.5, peso_quote=0.5,
     )
 
@@ -109,7 +109,7 @@ def test_stima_probabilita_quote_scontri_diretti_sono_orientate_sulla_squadra_di
     ])
     stats = modello.stats_pesate_squadre(df, data_riferimento=df["Date"].max(), half_life_giorni=730)
 
-    risultato = app.stima_probabilita(df, stats, "A", "B", peso_forma=0.0, peso_scontri=0.0, peso_quote=1.0)
+    risultato = pronostico.stima_probabilita(df, stats, "A", "B", peso_forma=0.0, peso_scontri=0.0, peso_quote=1.0)
 
     assert risultato is not None
     # Con peso_quote=1 le probabilita' finali sono quelle implicite nelle quote.
@@ -126,11 +126,11 @@ def test_stima_probabilita_orientamento_inverso_da_previsione_diversa():
     # cambiare. Con il bug dell'orientamento le quote mediate erano identiche nei
     # due sensi, quindi il vantaggio campo spariva del tutto.
     squadre = ["Milan", "Inter"]
-    if not all(s in set(app.stats["Squadra"]) for s in squadre):
+    if not all(s in set(pronostico.stats["Squadra"]) for s in squadre):
         pytest.skip("Squadre di riferimento non presenti nel dataset")
 
-    casa_milan = app.stima_probabilita(app.df, app.stats, "Milan", "Inter")
-    casa_inter = app.stima_probabilita(app.df, app.stats, "Inter", "Milan")
+    casa_milan = pronostico.stima_probabilita(pronostico.df, pronostico.stats, "Milan", "Inter")
+    casa_inter = pronostico.stima_probabilita(pronostico.df, pronostico.stats, "Inter", "Milan")
 
     assert casa_milan is not None and casa_inter is not None
     # p(Milan vince) deve essere piu' alta quando il Milan gioca in casa.
@@ -138,7 +138,7 @@ def test_stima_probabilita_orientamento_inverso_da_previsione_diversa():
 
 
 def test_stima_probabilita_squadra_sconosciuta_restituisce_none():
-    assert app.stima_probabilita(app.df, app.stats, "Squadra Non Esistente", "Inter") is None
+    assert pronostico.stima_probabilita(pronostico.df, pronostico.stats, "Squadra Non Esistente", "Inter") is None
 
 
 def test_stima_probabilita_peso_quote_alto_non_schiaccia_xg():
@@ -146,11 +146,11 @@ def test_stima_probabilita_peso_quote_alto_non_schiaccia_xg():
     # restavano pesati per la loro quota originale (es. 0.15) invece di essere
     # rinormalizzati a sommare 1 tra loro, producendo xG assurdamente bassi
     # (es. 0.24 invece di ~1.6) perche' "quote" non entra nel calcolo dell'xG.
-    squadre = app.stats["Squadra"].unique()
+    squadre = pronostico.stats["Squadra"].unique()
     squadra_casa, squadra_trasferta = squadre[0], squadre[1]
 
-    risultato = app.stima_probabilita(
-        app.df, app.stats, squadra_casa, squadra_trasferta,
+    risultato = pronostico.stima_probabilita(
+        pronostico.df, pronostico.stats, squadra_casa, squadra_trasferta,
         peso_forma=0.0, peso_scontri=0.15, peso_quote=0.85,
     )
 
@@ -362,16 +362,16 @@ def test_stats_pesate_squadre_emivita_corta_ignora_partite_vecchie():
 # ------------------------------------------------------------
 
 def test_dataset_nessuna_partita_duplicata():
-    duplicati = app.df.duplicated(subset=["Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG"]).sum()
+    duplicati = pronostico.df.duplicated(subset=["Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG"]).sum()
     assert duplicati == 0
 
 
 def test_dataset_ordinato_cronologicamente():
-    assert app.df["Date"].is_monotonic_increasing
+    assert pronostico.df["Date"].is_monotonic_increasing
 
 
 def test_dataset_nessuna_stagione_mancante_tra_min_e_max():
-    stagioni = sorted(int(s) for s in app.df["Stagione"].unique())
+    stagioni = sorted(int(s) for s in pronostico.df["Stagione"].unique())
     attese = list(range(stagioni[0], stagioni[-1] + 1))
     assert stagioni == attese
 

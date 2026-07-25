@@ -16,7 +16,15 @@ Dashboard predittiva per partite di Serie A basata su modelli statistici e quote
 
 ## 📋 Funzionalità
 
-### Dashboard Principale
+### Costruttore di schedina (homepage)
+- **Inserisci le quote 1X2** di una giornata (a mano, incollate da un foglio di calcolo, o precaricate da un esempio)
+- **Selezione automatica** delle partite più solide, con soglia di confidenza regolabile
+- **Probabilità reale** che la schedina esca piena, moltiplicatore e ritorno atteso
+- **Distribuzione completa** degli esiti corretti (Poisson binomiale): quanti ne azzecchi realisticamente, e la probabilità di sbagliarne al massimo una
+
+La leva principale non è il modello ma **quali partite includi**: misurato su 12.459 partite, una schedina da 13 passa dallo 0,03% (favorito su tutte le partite) al 3,6% (solo partite con confidenza ≥ 70%).
+
+### Pronostico su singola partita
 - **Pronostico 1X2** per qualsiasi match storico di Serie A
 - **Gol attesi (xG)** calcolati con modello Poisson
 - **Risultati esatti** più probabili (top 5)
@@ -136,8 +144,11 @@ Il dettaglio di ogni esperimento — con numeri, causa probabile del fallimento 
 
 ```
 PredictA/
-├── app.py                                  # Dashboard principale
+├── app.py                                  # Homepage: costruttore di schedina
+├── schedina.py                             # Logica schedina: Shin, Poisson binomiale, ritorno atteso
+├── pronostico.py                           # Logica di previsione sulla singola partita
 ├── modello.py                              # Modulo condiviso: Dixon-Coles, decadimento temporale, Shin, RPS, Elo
+├── multilega.py                            # Componenti del modello su 5 campionati (test set allargato)
 ├── protocollo.py                           # Protocollo di misura: RPS+bootstrap, McNemar, calcolo di potenza
 ├── unisci_dati.py                          # Unisce i CSV stagionali (Date, Stagione, quote apertura e chiusura)
 ├── scarica_elo.py                          # Scarica lo storico Elo delle squadre da clubelo.com
@@ -148,12 +159,15 @@ PredictA/
 ├── requirements.txt                        # Dipendenze Python pinnate
 │
 ├── pages/
+│   ├── 1_Pronostico.py                     # Pronostico su singola partita (era la vecchia homepage)
 │   └── backtesting.py                      # Pagina di validazione (walk-forward multi-stagione)
 │
 ├── tests/
 │   ├── conftest.py
 │   ├── test_model.py                       # Test automatici su forma, scontri diretti, pesi, Elo, Shin, integrità dati
-│   └── test_protocollo.py                  # Test del protocollo: riconosce un effetto vero, dichiara indistinguibile il rumore
+│   ├── test_protocollo.py                  # Test del protocollo: riconosce un effetto vero, dichiara indistinguibile il rumore
+│   ├── test_multilega.py                   # Test multi-lega, incluso il controllo diretto contro il data leakage
+│   └── test_schedina.py                    # Test schedina: Poisson binomiale verificata contro la binomiale
 │
 ├── stagioni/                               # File .txt delle singole stagioni (1993 → 2025)
 ├── altre_leghe/                            # Storico delle altre 4 leghe (gitignored)
@@ -227,7 +241,12 @@ streamlit run app.py
 
 ## 🎮 Utilizzo
 
-### Dashboard Principale
+### Costruttore di schedina (homepage)
+1. Inserisci le quote 1X2 della giornata nella tabella, oppure attiva **Precarica un esempio**
+2. Regola **confidenza minima** e **numero massimo di partite** nella barra laterale
+3. Leggi moltiplicatore, probabilità di schedina piena e ritorno atteso
+
+### Pronostico su singola partita
 1. Seleziona due squadre dai menu a tendina
 2. Regola i pesi nella sidebar (Forma, Scontri, Quote)
 3. Clicca **CALCOLA**
