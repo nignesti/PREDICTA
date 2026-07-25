@@ -60,8 +60,11 @@ with stage:
 
 with st.sidebar.container(border=True):
     st.markdown("**Pesi del modello**")
-    peso_forma_bt = st.slider("Forma recente", 0.0, 1.0, 0.10, 0.05,
-                        help="Validato su 3 stagioni indipendenti: un peso piccolo aiuta, oltre 0.20-0.25 peggiora.")
+    peso_forma_bt = st.slider("Forma recente", 0.0, 1.0, 0.0, 0.05,
+                        help="Default 0. Misurato su 12.421 partite di 5 campionati (valida_multilega.py): ogni peso "
+                             "sopra 0.02 peggiora l'RPS in modo statisticamente significativo, e il danno cresce in "
+                             "modo monotono col peso. Il vecchio default 0.10 era stato scelto su 3 stagioni di sola "
+                             "Serie A, campione troppo piccolo per distinguerlo dal rumore.")
     peso_scontri_bt = st.slider("Scontri diretti", 0.0, 0.5, 0.0, 0.05,
                         help="Su 3 stagioni di backtest non aggiunge valore misurabile una volta pesate bene le quote.")
     n_partite_forma = st.slider("Partite per forma", 3, 10, 3,
@@ -73,7 +76,9 @@ with st.sidebar.container(border=True):
     else:
         peso_elo_bt = 0.0
         st.caption(":material/info: Elo non disponibile in questo ambiente (`elo_storico.csv` non presente).")
-    peso_quote_bt = st.slider("Quote bookmaker", 0.0, 1.0, 0.90, 0.05)
+    peso_quote_bt = st.slider("Quote bookmaker", 0.0, 1.0, 1.0, 0.05,
+                        help="Default 1.0: su 12.421 partite di 5 campionati il mercato da solo batte qualunque "
+                             "miscela con il modello statistico, in tutti e 5 i campionati.")
     metodo_quote_bt = st.selectbox(
         "Metodo conversione quote", ["Shin (1992/1993)", "Proporzionale (1/quota)"],
         help="Come si tolgono le probabilita' vere dalle quote del bookmaker (che includono un margine). "
@@ -486,7 +491,8 @@ if st.sidebar.button(":material/compare_arrows: Confronta configurazioni", width
         ("Primo default (storico+forma+scontri+quote)", 0.5, 0.15, 0.15, 0.0),
         ("Solo quote bookmaker", 0.0, 0.0, 1.0, 0.0),
         ("Secondo default (forma=0,scontri=0.15,quote=0.85)", 0.0, 0.15, 0.85, 0.0),
-        ("Ottimale validato su 3 stagioni (senza Elo)", 0.10, 0.0, 0.90, 0.0),
+        ("Vecchio ottimale su 3 stagioni Serie A (forma=0.10)", 0.10, 0.0, 0.90, 0.0),
+        ("Ottimale misurato su 5 campionati (solo mercato)", 0.0, 0.0, 1.0, 0.0),
     ]
     if ELO_DISPONIBILE:
         configurazioni += [
@@ -513,7 +519,10 @@ if st.sidebar.button(":material/compare_arrows: Confronta configurazioni", width
     fig_confronto = go.Figure(go.Bar(
         x=df_confronto["Configurazione"], y=df_confronto["Accuratezza"],
         text=[f"{a:.1%}" for a in df_confronto["Accuratezza"]], textposition="outside",
-        marker_color=["#448AFF", "#00E676", "#B388FF", "#FF9100", "#8B949E", "#00BCD4", "#FF1744", "#FFD600"]
+        # Una tinta per configurazione: la lista deve coprire il caso con Elo
+        # disponibile (9 configurazioni), altrimenti Plotly resta senza colori.
+        marker_color=["#448AFF", "#00E676", "#B388FF", "#FF9100", "#8B949E", "#00BCD4",
+                      "#FF1744", "#FFD600", "#E040FB"][:len(df_confronto)]
     ))
     fig_confronto.update_layout(
         height=400, yaxis_tickformat=".0%", yaxis_title="Accuratezza 1X2",

@@ -32,11 +32,13 @@ Il sistema combina **quattro componenti** con pesi regolabili:
 | Componente | Descrizione | Peso Default |
 |------------|-------------|--------------|
 | **Media storica** | Gol fatti/subiti, pesati con decadimento temporale (le partite recenti contano di più) | 0% |
-| **Forma recente** | Performance nelle ultime N partite | 10% |
+| **Forma recente** | Performance nelle ultime N partite | 0% |
 | **Scontri diretti** | Precedenti tra le due squadre | 0% |
-| **Quote bookmaker** | Saggezza del mercato (consenso multi-bookmaker, quota di chiusura) | 90% |
+| **Quote bookmaker** | Saggezza del mercato (consenso multi-bookmaker, quota di chiusura) | 100% |
 
-I pesi di default sono il risultato di una grid search su backtest walk-forward, **validata su tre stagioni indipendenti** (2023, 2024, 2025) e non solo su quella usata per cercarli — vedi la sezione Risultati sotto per i dettagli. Il risultato più sorprendente: né lo storico pesato nel tempo né gli scontri diretti aggiungono valore misurabile una volta pesate bene le quote (probabilmente perché il mercato incorpora già efficientemente quell'informazione); un piccolo peso alla forma recentissima invece aiuta in modo consistente. Restano comunque slider liberi se vuoi sperimentare altre combinazioni.
+**I pesi di default danno il 100% al mercato.** Non è una resa preventiva: è il risultato misurato su 12.421 partite di 5 campionati (vedi sotto). Ogni peso assegnato al modello statistico peggiora la calibrazione in modo statisticamente significativo, e il danno cresce in modo monotono col peso. Il vecchio default (forma 10%, quote 90%) era stato scelto su 3 stagioni di sola Serie A, un campione troppo piccolo per distinguerlo dal rumore.
+
+Gli slider restano liberi: cambia solo il punto di partenza, e la pagina di Backtesting permette di riprodurre il confronto con i tuoi dati.
 
 ### Algoritmo
 1. **Calcolo xG**: forza attacco/difesa di ogni squadra relativa alla media di campionato (stile Poisson classico), combinata pesando storico, forma e scontri diretti
@@ -52,7 +54,7 @@ I pesi di default sono il risultato di una grid search su backtest walk-forward,
 
 ## 📊 Risultati Backtesting
 
-Validati su **tre stagioni di test indipendenti** (2023, 2024, 2025), ognuna con le stagioni precedenti come training — non solo sull'unica stagione su cui è girata la grid search, per escludere che i pesi scelti fossero semplicemente rumore statistico. Tutte le configurazioni sotto usano gli stessi pesi ottimali (forma=0.10, scontri=0, quote=0.90) salvo dove indicato:
+Storico delle configurazioni provate, su **tre stagioni di test indipendenti** (2023, 2024, 2025) con le stagioni precedenti come training. Tutte usano i pesi che all'epoca erano ritenuti ottimali (forma=0.10, scontri=0, quote=0.90) salvo dove indicato. **Leggi però l'avvertenza subito sotto la tabella prima di trarne conclusioni**: questi numeri sono stati poi smentiti su un campione più grande.
 
 | Configurazione | Acc. 2025 | Acc. 2024 | Acc. 2023 | **Media** | RPS medio |
 |---|---|---|---|---|---|
@@ -63,26 +65,34 @@ Validati su **tre stagioni di test indipendenti** (2023, 2024, 2025), ognuna con
 | Fine Fase 1 (apertura, conversione proporzionale) | 56.2% | 53.7% | 54.7% | 54.9% | 0.1889 |
 | + correzione di Shin | 55.9% | 53.7% | 54.7% | 54.8% | 0.1886 |
 | Shin + quote di chiusura | 55.4% | 54.7% | 55.5% | 55.2% | 0.1885 |
-| **Default attuale (+ medie di lega pesate)** | **55.4%** | **54.5%** | **55.3%** | **55.1%** | **0.1884** |
+| Shin + chiusura + medie di lega pesate (forma=0.10) | 55.4% | 54.5% | 55.3% | 55.1% | 0.1884 |
+| **Default attuale (solo mercato, forma=0)** † | **54.1%** | **54.1%** | **55.3%** | **54.5%** | **0.1881** |
 
 *\*Numero di riferimento dalla validazione iniziale su una sola stagione, prima dell'introduzione del decadimento temporale.*
 
+*† Riga misurata con `multilega.py` (finestra di storico troncata a 1.600 partite) invece che con `pages/backtesting.py`: la differenza di pipeline vale pochi centesimi di punto. Nota che sulle sole 3 stagioni di Serie A il default attuale ha accuratezza più bassa della riga sopra ma RPS migliore — è esattamente il tipo di differenza che la sezione seguente mostra essere sotto la soglia di misurabilità, e che sulle 12.421 partite si risolve a favore del solo mercato.*
+
 *Benchmark "predici sempre 1" sul test 2025: 38.9%. Oltre all'accuratezza, il backtesting misura anche RPS e log-loss (calibrazione delle probabilità): più basso è meglio; una previsione uniforme dà circa 0.28, una perfetta dà 0. Usa il bottone **🔬 Confronta configurazioni** nella pagina di Backtesting per riprodurre questi numeri con i tuoi dati.*
 
-### ⚠️ Quanto sono affidabili questi numeri
+### ⚠️ La tabella sopra è misurata su un campione troppo piccolo
 
-Poco, ed è la cosa più importante da sapere prima di leggerli. Ripetendo il confronto su **7 stagioni** (2019-2025, 2.659 partite — l'intera finestra coperta dalle quote di chiusura) invece che su 3, e verificando la significatività statistica con il test appropriato per confronti sugli stessi match:
+I numeri sopra sono corretti ma **non affidabili**, ed è la cosa più importante da sapere prima di leggerli: 380 partite a stagione non bastano a distinguere differenze di mezzo punto percentuale.
 
-| Confronto | Δ accuratezza | McNemar | Verdetto |
+Portando il test da 3 stagioni di sola Serie A a **7 stagioni di 5 campionati** (2019-2025, **12.421 partite**), la conclusione cambia segno:
+
+| Confronto | Δ RPS (criterio primario) | Δ accuratezza | Verdetto |
 |---|---:|---:|---|
-| Modello completo vs solo mercato | +0.34 pp | p = 0.28 | **non distinguibile dal rumore** |
-| Quote di chiusura vs apertura | +0.38 pp | p = 0.25 | non distinguibile dal rumore |
+| **Modello (forma 10% + quote 90%) vs solo mercato** | **+0.00058** — IC95% [+0.00029, +0.00088] | −0.11 pp | ❌ **peggiore** |
 
-**Il modello non batte il mercato in modo misurabile.** Il vantaggio dichiarato in passato (~1 punto percentuale su 3 stagioni) si dimezza allargando il campione a 7 — la firma tipica di un risultato dovuto al caso. Sull'RPS il modello è anzi leggermente peggiore del solo mercato.
+**Il modello non batte il mercato: è misurabilmente peggiore.** L'intervallo di confidenza esclude lo zero, e l'RPS del modello è peggiore in **tutti e cinque i campionati**, senza eccezioni.
 
-Il motivo tecnico: fra due configurazioni cambia previsione solo il ~2% delle partite, quindi l'accuratezza su 380 partite a stagione non ha abbastanza potenza statistica per distinguere differenze di questa dimensione. Il dettaglio, il calcolo di potenza e le conseguenze metodologiche sono in [ROADMAP.md](ROADMAP.md); lo script che lo verifica è `valida_significativita.py`.
+Il dettaglio più istruttivo è per campionato: l'accuratezza favorisce il modello **solo in Serie A** (+0.30 pp), l'unico su cui il progetto avesse mai misurato. Negli altri quattro è negativa. Era il test diagnostico decisivo — un vantaggio reale comparirebbe ovunque, uno dovuto al caso solo dove lo si è cercato.
 
-Questo non invalida il progetto: un mercato di scommesse liquido su un campionato importante *dovrebbe* essere difficile da battere, e misurarlo onestamente è un risultato in sé.
+Da qui il default a 100% quote: misurando il peso ottimale sulle 12.421 partite, l'RPS peggiora in modo **monotono** all'aumentare del peso del modello (0.19564 a peso 0, 0.19622 a peso 0.10, 0.19768 a peso 0.20). Non esiste un ottimo intermedio.
+
+Il motivo per cui non ce ne eravamo accorti: fra due configurazioni cambia previsione solo il ~2% delle partite, quindi il 98% del campione non porta informazione sulla differenza. Il calcolo di potenza, il protocollo di misura e le conseguenze sono in [ROADMAP.md](ROADMAP.md); gli script sono `valida_significativita.py` e `valida_multilega.py`.
+
+Questo non invalida il progetto: un mercato di scommesse liquido sui cinque campionati principali *dovrebbe* essere difficile da battere, e misurarlo onestamente — invece di continuare a credere a un vantaggio inesistente — è un risultato in sé.
 
 **Cosa abbiamo imparato costruendo questi numeri (in ordine cronologico di scoperta):**
 1. Il calcolo della "forma recente" usava quasi solo le partite in trasferta invece delle ultime N in ordine cronologico — bug corretto.

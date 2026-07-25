@@ -73,12 +73,16 @@ with st.sidebar:
 
     with st.container(border=True):
         st.markdown("**Pesi del modello**")
-        peso_forma = st.slider("Forma recente", 0.0, 1.0, 0.10, 0.05,
-                           help="Validato su 3 stagioni indipendenti: un peso piccolo aiuta, oltre 0.20-0.25 peggiora e diventa rumore.")
+        peso_forma = st.slider("Forma recente", 0.0, 1.0, 0.0, 0.05,
+                           help="Default 0: misurato su 12.421 partite di 5 campionati, ogni peso sopra 0.02 peggiora "
+                                "la calibrazione in modo statisticamente significativo, e il danno cresce in modo "
+                                "monotono. Resta regolabile per esplorare, ma l'ottimo misurato e' zero.")
         peso_scontri = st.slider("Scontri diretti", 0.0, 0.5, 0.0, 0.05,
                            help="Su 3 stagioni di backtest non aggiunge valore misurabile una volta pesate bene le quote: default a 0.")
-        peso_quote = st.slider("Quote bookmaker", 0.0, 1.0, 0.90, 0.05,
-                           help="Peso delle quote storiche Bet365/Pinnacle. Pesi di default validati su 3 stagioni indipendenti di backtest.")
+        peso_quote = st.slider("Quote bookmaker", 0.0, 1.0, 1.0, 0.05,
+                           help="Peso della quota di consenso (chiusura quando disponibile, convertita con Shin). "
+                                "Default 1.0: su 12.421 partite di 5 campionati il mercato da solo batte qualunque "
+                                "miscela con il modello statistico.")
         peso_storico = 1 - peso_forma - peso_scontri - peso_quote
 
         if peso_storico < 0:
@@ -152,7 +156,7 @@ def scontri_diretti(df, squadra1, squadra2, ultimi_n=10):
 stats = stats_pesate_squadre(df, data_riferimento=df["Date"].max(), half_life_giorni=EMIVITA_GIORNI)
 
 def stima_probabilita(df, stats, squadra_casa, squadra_trasferta,
-                      peso_forma=0.10, peso_scontri=0.0, peso_quote=0.90):
+                      peso_forma=0.0, peso_scontri=0.0, peso_quote=1.0):
     """
     Combina: storico + forma + scontri diretti + quote dei bookmaker
     """
@@ -424,6 +428,10 @@ if calcola:
             with col_g2:
                 with st.container(border=True):
                     st.markdown("**Over / Under**")
+                    if risultato['quote_presenti'] and peso_quote >= 1.0:
+                        st.caption(":material/info: Con le quote al 100% il pronostico 1X2 viene interamente dal "
+                                   "mercato, mentre gol attesi, risultati esatti e Over/Under restano calcolati "
+                                   "dal modello statistico: le due parti possono non concordare.")
                     st.metric("Gol totali attesi", f"{risultato['gol_totali_attesi']:.2f}")
                     st.markdown(
                         f":green-badge[Over 1.5 {risultato['over_15']:.0%}] "

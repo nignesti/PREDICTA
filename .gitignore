@@ -17,3 +17,7 @@ archive/
 # Rigenerabile con "python scarica_altre_leghe.py" (dati grezzi di altre leghe
 # per l'estensione multi-campionato, Fase 3 punto 3)
 altre_leghe/
+
+# Componenti multi-lega precalcolate (~25 min di calcolo, rigenerabile con
+# "python valida_multilega.py --ricalcola"): cache, non dato sorgente
+componenti_multilega.csv.gz

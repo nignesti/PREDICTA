@@ -10,11 +10,13 @@ Questo documento raccoglie l'analisi strategica completa su dati, feature e tecn
 
 ### Configurazione di produzione
 
-Pesi: `forma=0.10`, `scontri=0`, `quote=0.90` (quindi `storico=0` per costruzione). Quote di **chiusura** convertite con la correzione di **Shin**, medie di lega **pesate nel tempo**. Dixon-Coles con emivita 730 giorni e correzione tau.
+Pesi: `forma=0`, `scontri=0`, `quote=1.00`. Quote di **chiusura** convertite con la correzione di **Shin**, medie di lega **pesate nel tempo**. Dixon-Coles con emivita 730 giorni e correzione tau resta in uso per xG, risultati esatti e Over/Under.
 
-**55.02% di accuratezza / 0.1909 RPS** su 7 stagioni di test (2019-2025, 2.659 partite), contro **54.68% / 0.1904** del solo mercato.
-
-> ⚠️ **Quella differenza non è statisticamente significativa** (McNemar p = 0.28; sull'RPS il modello è anzi leggermente peggiore). Il progetto ha a lungo dichiarato "~1 punto percentuale sopra il mercato" sulla base di 3 stagioni: allargando a 7 il vantaggio si dimezza, il che indica che era in buona parte rumore. Vedi la sezione "problema di misura" più sotto — è la conclusione più importante di tutto il lavoro fatto finora.
+> ⚠️ **Il modello statistico non batte il mercato: è misurabilmente peggiore, e il suo peso ottimale è zero.**
+>
+> Misurato su **12.421 partite di 5 campionati** (2019-2025), il blend con `forma=0.10` ha RPS 0.19622 contro 0.19564 del solo mercato: differenza +0.00058 con IC95% [+0.00029, +0.00088], che **esclude lo zero**. L'RPS del modello è peggiore in **tutti e cinque i campionati**. Facendo variare il peso, il danno cresce in modo monotono e non esiste un ottimo intermedio.
+>
+> Il progetto ha a lungo dichiarato "~1 punto percentuale sopra il mercato" sulla base di 3 stagioni di sola Serie A. Il breakdown per campionato spiega perché: l'accuratezza favorisce il modello **solo in Serie A** (+0.30 pp), l'unico campionato su cui fosse mai stato misurato; negli altri quattro è negativa. Vedi la sezione "priorità 1" più sotto.
 
 ### Registro completo degli esperimenti
 
@@ -52,7 +54,10 @@ Gli unici due miglioramenti adottati (Shin, quote di chiusura) non introducono *
 
 La spiegazione più probabile è la stessa in tutti i casi: **il mercato incorpora già quell'informazione**, e in modo più efficiente di quanto possiamo fare noi con medie sui gol.
 
-Con una precisazione importante aggiunta dopo la verifica di significatività: **anche i due "successi" non sono statisticamente distinguibili dal rumore.** Shin e quote di chiusura restano adottati — sono gratuiti, teoricamente fondati e vanno nella direzione giusta su entrambe le metriche — ma vanno descritti come "coerenti con l'attesa", non come miglioramenti misurati.
+Con due precisazioni importanti, aggiunte dopo la verifica di significatività e la priorità 1:
+
+- **Anche i due "successi" non sono statisticamente distinguibili dal rumore.** Shin e quote di chiusura restano adottati — sono gratuiti, teoricamente fondati e vanno nella direzione giusta su entrambe le metriche — ma vanno descritti come "coerenti con l'attesa", non come miglioramenti misurati.
+- **La frase va letta al netto del risultato finale**: non è che "estrarre meglio l'informazione dalle quote" faccia battere il mercato. Fa arrivare *al* mercato. Misurato su 5 campionati, il miglior previsore disponibile è la quota di chiusura da sola, e ogni componente statistica aggiunta peggiora la calibrazione.
 
 Una nota secondaria ma ricorrente: **RPS e accuratezza si muovono spesso in direzioni opposte**. Ensemble stacking e multi-campionato sembravano avere il miglior RPS mai misurato, e il criterio dell'epoca ("guadagno su entrambe le metriche") li aveva esclusi. La **Fase 0 li ha rivalutati**: quel primato era un artefatto di un baseline sbagliato, e con la configurazione corretta sono entrambi *indistinguibili* dal modello statistico. La conclusione pratica non cambia, la motivazione sì — vedi la sezione Fase 0.
 
@@ -158,6 +163,44 @@ La Serie A produce 380 partite l'anno: **queste domande non sono rispondibili co
 2. **Il multi-campionato è l'unico esperimento ancora vivo.** È il più vicino alla significatività (p = 0.077, IC dell'RPS quasi interamente sotto lo zero) e l'unico che richiede una quantità di dati raggiungibile: ~5.500 partite contro le 2.659 attuali, cioè poco più del doppio.
 
 3. **La via d'uscita dal regime "tutto indistinguibile"**: le altre 4 leghe sono già scaricate e usate solo come *training*. Usarle anche come **test** porterebbe il campione a ~13.000 partite su 7 stagioni — esattamente l'ordine di grandezza necessario a risolvere sia il multi-campionato sia lo stacking. Richiede di verificare che le quote di chiusura siano coperte anche lì e che il modello statistico sia calcolabile per-lega (entrambe le cose già fatte in `prototipo_gradient_boosting_multiliga.py`), ma nessun dato nuovo.
+
+## Priorità 1 — Altre leghe come test ✅
+
+Eseguita subito dopo la Fase 0, che aveva stabilito che gli effetti in gioco richiedono 15-65 stagioni di test per essere misurati mentre la Serie A ne produce una all'anno.
+
+**Cosa è stato fatto.** `multilega.py` calcola le componenti del modello statistico su tutti e 5 i campionati principali con la stessa configurazione di produzione, trattando ogni lega come un mondo chiuso (medie di campionato e confronti fra squadre interni alla lega, perché livelli di gol e vantaggio campo differiscono). Le altre 4 leghe erano già scaricate ma usate solo come training del gradient boosting; qui diventano **test**. Copertura delle quote di chiusura 2019-2025: completa in tutte e 5.
+
+Il campione passa da 2.659 a **12.421 partite**, 4,7 volte tanto, senza dati nuovi. Le componenti sono messe in cache su disco (`componenti_multilega.csv.gz`, ~25 min di calcolo) perché non dipendono dai pesi del blend.
+
+Nel farlo è emerso che `prototipo_gradient_boosting_multiliga.py` usava le medie di lega **globali** — lo stesso bug #3 corretto per la Serie A, mai propagato alle altre leghe. Il modulo nuovo usa `medie_lega_pesate`.
+
+**Risultato — la domanda centrale del progetto ha finalmente una risposta:**
+
+| Confronto | Δ RPS (IC95%) | Δ acc | Discordanti | Verdetto |
+|---|---|---:|---:|---|
+| **Modello (forma 0.10) vs solo mercato** — 5 campionati | **+0.00058 [+0.00029, +0.00088]** | −0.11 pp | 310 / 12421 | ❌ **PEGGIO** |
+| Serie A | +0.00052 [−0.00008, +0.00111] | **+0.30 pp** | 54 / 2651 | ➖ indistinguibile |
+| Premier League | +0.00045 [−0.00019, +0.00110] | −0.60 pp | 60 / 2653 | ➖ indistinguibile |
+| Liga | +0.00098 [+0.00039, +0.00156] | −0.11 pp | 69 / 2654 | ❌ peggio |
+| Bundesliga | +0.00064 [−0.00011, +0.00137] | −0.05 pp | 69 / 2133 | ➖ indistinguibile |
+| Ligue 1 | +0.00029 [−0.00037, +0.00098] | −0.09 pp | 58 / 2330 | ➖ indistinguibile |
+
+Per la prima volta nel progetto una differenza è statisticamente distinguibile — e va nella direzione sbagliata. La prova più forte è la **coerenza**: l'RPS è peggiore in 5 campionati su 5, senza eccezioni. E l'unico campionato in cui l'accuratezza favorisce il modello è proprio quello su cui era stato tarato.
+
+**Peso ottimale del modello: zero.** Misurato sulle stesse 12.421 partite:
+
+| Peso forma | RPS | Accuratezza | vs mercato puro |
+|---:|---:|---:|---|
+| **0.00** | **0.19564** | 53.93% | *riferimento* |
+| 0.02 | 0.19568 | 53.96% | ➖ indistinguibile |
+| 0.05 | 0.19582 | 53.88% | ❌ peggio |
+| 0.10 *(vecchio default)* | 0.19622 | 53.82% | ❌ peggio |
+| 0.15 | 0.19684 | 53.68% | ❌ peggio |
+| 0.20 | 0.19768 | 53.41% | ❌ peggio |
+
+Monotòno: non esiste un ottimo intermedio da cercare. **Default portato a `quote=1.00`** in `app.py` e in `pages/backtesting.py`; gli slider restano liberi.
+
+**Conclusione.** Il mercato delle scommesse sui cinque campionati principali è efficiente, e la quota di chiusura convertita con Shin è il miglior previsore 1X2 a disposizione. Le medie sui gol non aggiungono informazione: la sottraggono. L'effetto è piccolo in valore assoluto (~0.3% relativo sull'RPS), quindi il modello non è un disastro — è solo un po' peggio di non averlo. Ma la direzione ora è certa, dove prima non lo era.
 
 ### Cosa resta aperto
 
