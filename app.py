@@ -10,6 +10,13 @@ A differenza della pagina "Pronostico", qui le quote usate nel blend sono quelle
 della partita da prevedere (inserite da te), non la media dei precedenti scontri
 diretti: e' il dato corretto, perche' descrive proprio l'incontro in questione.
 
+Nota sulla lunghezza della schedina. Il mercato scelto vincola quante partite
+possono starci prima ancora della qualita' del modello: sull'1X2 la confidenza
+mediana del favorito e' 51.4% e solo il 30% delle partite arriva al 60%, quindi
+una giornata da 10 ne produce circa 3 a soglia di default. Per giocare la
+giornata intera serve la doppia chance, che si ricava dalle stesse tre quote
+senza dati nuovi. Misure e limiti in valida_doppia_chance.py.
+
 Nota sui pesi. Misurato su 12.459 partite di 5 campionati, la componente
 statistica non migliora la previsione rispetto alle sole quote (vedi ROADMAP.md).
 I pesi restano regolabili e di default tutte e quattro le componenti
@@ -32,6 +39,14 @@ st.set_page_config(
 
 SQUADRE = sorted(stats["Squadra"].unique().tolist())
 COLONNE = ["Casa", "Trasferta", "Quota 1", "Quota X", "Quota 2", "Quota Over 2.5", "Quota Under 2.5"]
+MERCATI = ["1X2", "Doppia chance", "Over/Under 2.5"]
+# Come scegliere fra piu' esiti ammessi sulla stessa partita. Le due regole hanno
+# lo stesso ritorno atteso e cambiano solo la forma del rischio: vedi
+# valida_doppia_chance.py, sezione 3.
+REGOLE = {
+    "Il più probabile": "confidenza",
+    "Quello che paga di più, sopra soglia": "quota",
+}
 
 
 @st.cache_data
@@ -90,15 +105,40 @@ with st.sidebar:
         soglia = st.slider(
             "Confidenza minima", 0.35, 0.85, 0.60, 0.05,
             help="Include solo le partite in cui l'esito piu' probabile supera questa soglia. "
-                 "E' la leva piu' importante sulla probabilita' di schedina piena.")
+                 "E' la leva piu' importante sulla probabilita' di schedina piena, ma va letta "
+                 "insieme ai mercati ammessi: sull'1X2 la confidenza mediana del favorito e' "
+                 "51.4% e solo il 30% delle partite arriva al 60%, quindi una soglia al 60% con "
+                 "il solo 1X2 tiene circa 3 partite su 10. In doppia chance la mediana e' 78.2% "
+                 "e le stesse 10 partite passano tutte. Misure in valida_doppia_chance.py.")
         max_partite = st.slider("Numero massimo di partite", 2, 20, 13, 1)
-        mercati = st.radio(
-            "Esiti ammessi",
-            ["Il piu' sicuro fra 1X2 e Over/Under", "Solo 1X2", "Solo Over/Under 2.5"],
-            help="Con entrambi i mercati disponibili, per ogni partita si sceglie l'esito con la "
-                 "confidenza piu' alta. E' l'opzione migliore delle tre: su 255 giornate simulate "
-                 "ha prodotto 6 schedine piene da 13 contro 5 del solo 1X2 e 1 del solo Over/Under. "
-                 "Avere due mercati per partita allarga il paniere di pronostici ad alta confidenza.")
+        mercati = st.multiselect(
+            "Mercati ammessi", MERCATI, default=["1X2", "Over/Under 2.5"],
+            help="Per ogni partita si gioca un solo esito: quello con la confidenza piu' alta "
+                 "fra i mercati che spunti qui.\n\n"
+                 "**1X2 + Over/Under** (default) e' la scelta migliore per schedine corte: su "
+                 "266 giornate simulate una schedina da 3 in 1X2 e' uscita piena nel 32% dei "
+                 "casi, con un moltiplicatore mediano di 2.9x.\n\n"
+                 "**Doppia chance** (1X, 12, X2) serve quando vuoi giocare la giornata intera: "
+                 "non richiede quote in piu' — si ricava dalle tre quote 1X2 — ed e' calibrata "
+                 "come l'1X2 (Brier 0.1905 su entrambi). Su quelle stesse 266 giornate una "
+                 "schedina da 10 in 1X2 non e' **mai** uscita piena, mentre in doppia chance e' "
+                 "uscita piena 30 volte. Il prezzo e' il moltiplicatore: 7x invece di 500x.\n\n"
+                 "Nessun mercato e' piu' economico degli altri: il ritorno per singola giocata "
+                 "sta fra il 92% e il 98% su tutti e sei gli esiti. La doppia chance non costa "
+                 "meno, e' solo piu' probabile.")
+        regola = st.radio(
+            "Con più esiti sopra soglia, gioca", list(REGOLE),
+            help="Quando su una partita più esiti superano la soglia, quale si gioca. La doppia "
+                 "chance vince sempre il confronto sulla confidenza (copre due esiti su tre), "
+                 "quindi con **il più probabile** finisci per giocarla ovunque, anche su un "
+                 "Inter-Monza dove l'1X vale 1.01.\n\n"
+                 "Sembrerebbe uno spreco, ma misurato non lo è: le due regole hanno lo **stesso "
+                 "ritorno atteso** (66% contro 65% a soglia 60%, differenza dentro il rumore). "
+                 "Cambia la forma del rischio, non il valore. Su 266 giornate simulate: il più "
+                 "probabile → 30 schedine piene a moltiplicatore mediano 7x; quello che paga di "
+                 "più → 6 schedine piene a moltiplicatore mediano 24.5x.\n\n"
+                 "Nessuna delle due domina: scegli se preferire vincere spesso poco o di rado "
+                 "molto. Con i soli 1X2 e Over/Under la scelta non cambia quasi nulla.")
 
 # ------------------------------------------------------------
 # INTESTAZIONE
@@ -200,6 +240,21 @@ for numero, (_, riga) in enumerate(inserite.iterrows(), start=1):
                       solo_mercato=f"{mercato_1x2['pronostico']} ({mercato_1x2['confidenza']:.0%})",
                       solo_modello=f"{ESITI[j]} ({base[j]:.0%})")]
 
+    # Candidato doppia chance: nessuna quota in piu' da inserire, si ricava
+    # dalle tre quote 1X2 gia' presenti (vedi schedina.analizza_doppia_chance).
+    # Usa le probabilita' del blend, non quelle di mercato, cosi' che i cursori
+    # dei pesi agiscano anche qui.
+    dc = sc.analizza_doppia_chance(*[float(q) for q in quote], probabilita=prob)
+    dc_mercato = sc.analizza_doppia_chance(*[float(q) for q in quote])
+    dc_modello = sc.analizza_doppia_chance(*[float(q) for q in quote], probabilita=base)
+    candidati.append(dict(comune,
+                          mercato="Doppia chance",
+                          pronostico=dc["pronostico"], confidenza=dc["confidenza"],
+                          quota_pronostico=dc["quota_pronostico"],
+                          margine=dc["margine"],
+                          solo_mercato=f"{dc_mercato['pronostico']} ({dc_mercato['confidenza']:.0%})",
+                          solo_modello=f"{dc_modello['pronostico']} ({dc_modello['confidenza']:.0%})"))
+
     # Candidato Over/Under: disponibile solo se sono state inserite le due quote.
     if not any(pd.isna(q) for q in quote_ou) and all(float(q) > 1.0 for q in quote_ou):
         ou = sc.analizza_over_under(float(quote_ou[0]), float(quote_ou[1]),
@@ -215,21 +270,27 @@ for numero, (_, riga) in enumerate(inserite.iterrows(), start=1):
                               solo_modello=("Over 2.5" if p_over_modello >= 0.5 else "Under 2.5")
                                            + f" ({max(p_over_modello, 1 - p_over_modello):.0%})"))
 
-    if mercati == "Solo 1X2":
-        ammessi = [c for c in candidati if c["mercato"] == "1X2"]
-    elif mercati == "Solo Over/Under 2.5":
-        ammessi = [c for c in candidati if c["mercato"] == "Over/Under 2.5"]
-        if not ammessi:
-            problemi.append(f"riga {numero} ({casa}-{trasferta}): mancano le quote Over/Under")
-    else:
-        ammessi = candidati
+    ammessi = [c for c in candidati if c["mercato"] in mercati]
+    if not ammessi and "Over/Under 2.5" in mercati and len(mercati) == 1:
+        problemi.append(f"riga {numero} ({casa}-{trasferta}): mancano le quote Over/Under")
 
     if ammessi:
-        # Un solo esito per partita: quello con la confidenza piu' alta fra i mercati ammessi.
-        partite.append(max(ammessi, key=lambda c: c["confidenza"]))
+        # Un solo esito per partita. Con la regola "quota" si prende, fra gli esiti
+        # che superano gia' la soglia, quello che paga di piu'; se nessuno la
+        # supera si ripiega sul piu' probabile, cosi' la partita compare fra le
+        # escluse invece di sparire.
+        sopra = [c for c in ammessi if c["confidenza"] >= soglia]
+        if REGOLE[regola] == "quota" and sopra:
+            partite.append(max(sopra, key=lambda c: c["quota_pronostico"]))
+        else:
+            partite.append(max(ammessi, key=lambda c: c["confidenza"]))
 
 for messaggio in problemi:
     st.warning(f":material/warning: {messaggio}")
+
+if not mercati:
+    st.warning(":material/warning: Spunta almeno un mercato nella barra laterale.")
+    st.stop()
 
 if not partite:
     st.info(":material/info: Compila almeno una partita, oppure attiva **Precarica un esempio**.")
@@ -245,6 +306,25 @@ if not selezionate:
     st.warning(f":material/warning: Nessuna partita raggiunge il {soglia:.0%} di confidenza "
                f"(la più sicura è al {ordinate[0]['confidenza']:.0%}). Abbassa la soglia.")
     st.stop()
+
+# La domanda piu' frequente su questa pagina e' "perche' me ne tiene solo 3 su 10?".
+# Non e' un caso sfortunato: e' il valore atteso dell'1X2 a soglia 60% (misurato in
+# valida_doppia_chance.py). Quando succede conviene dirlo subito, con la via d'uscita.
+scartate_per_soglia = len(ordinate) - len(selezionate)
+if scartate_per_soglia and len(selezionate) < len(ordinate) / 2:
+    if "Doppia chance" in mercati:
+        rimedio = (f"Per allungarla puoi solo abbassare la soglia: la più sicura fra le escluse "
+                   f"è al {escluse[0]['confidenza']:.0%}.")
+    else:
+        rimedio = ("Spunta **Doppia chance** fra i mercati ammessi per giocarle quasi tutte: "
+                   "si ricava dalle quote che hai già inserito e su queste partite la confidenza "
+                   "mediana passa da circa 51% a circa 78%. In cambio il moltiplicatore crolla.")
+    st.info(
+        f":material/info: **{scartate_per_soglia} partite su {len(ordinate)} non arrivano al "
+        f"{soglia:.0%}.** È il comportamento atteso, non un dato mancante: sull'1X2 il pareggio "
+        f"si prende stabilmente circa un quarto della probabilità, quindi il favorito mediano sta "
+        f"intorno al 51% e su una giornata da 10 partite ne superano il 60% circa 3. {rimedio}"
+    )
 
 riepilogo = sc.riepiloga_schedina(selezionate)
 

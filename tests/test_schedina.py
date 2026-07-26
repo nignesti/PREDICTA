@@ -203,3 +203,87 @@ def test_over_under_e_spesso_piu_sicuro_dell_1x2():
     equilibrata = schedina.analizza_partita(2.80, 3.30, 2.60)      # 1X2 molto incerto
     ou = schedina.analizza_over_under(1.55, 2.45)                   # Over abbastanza netto
     assert ou["confidenza"] > equilibrata["confidenza"]
+
+
+# ------------------------------------------------------------
+# Doppia chance
+# ------------------------------------------------------------
+def test_doppia_chance_sceglie_la_coppia_piu_probabile():
+    # Con un favorito netto in casa, la coppia piu' probabile e' 1X: prende il
+    # favorito e il pareggio, e lascia fuori solo l'esito meno probabile.
+    r = schedina.analizza_doppia_chance(1.50, 4.00, 7.00)
+    assert r["pronostico"] == "1X"
+    assert r["esiti_coperti"] == ("1", "X")
+    assert r["mercato"] == "Doppia chance"
+
+
+def test_doppia_chance_con_favorito_in_trasferta():
+    r = schedina.analizza_doppia_chance(7.00, 4.00, 1.50)
+    assert r["pronostico"] == "X2"
+
+
+def test_doppia_chance_quota_e_realizzabile_con_due_giocate_1x2():
+    # La quota non e' una stima: e' il pagamento di una posta divisa fra i due
+    # esiti in proporzione a 1/q. Se questa identita' si rompe, il
+    # moltiplicatore mostrato in pagina promette piu' di quanto si incassi.
+    q1, qx, q2 = 1.50, 4.00, 7.00
+    r = schedina.analizza_doppia_chance(q1, qx, q2)
+    q_dc = r["quota_pronostico"]
+    assert q_dc == pytest.approx(1.0 / (1.0 / q1 + 1.0 / qx))
+
+    # Verifica diretta: 1 euro diviso fra "1" e "X", stesso incasso in entrambi i casi.
+    peso_1 = (1 / q1) / (1 / q1 + 1 / qx)
+    assert peso_1 * q1 == pytest.approx(q_dc)
+    assert (1 - peso_1) * qx == pytest.approx(q_dc)
+
+
+def test_doppia_chance_confidenza_e_la_somma_dei_due_esiti():
+    singola = schedina.analizza_partita(2.10, 3.40, 3.60)
+    dc = schedina.analizza_doppia_chance(2.10, 3.40, 3.60)
+    coperti = {"1": singola["prob_1"], "X": singola["prob_X"], "2": singola["prob_2"]}
+    atteso = sum(coperti[e] for e in dc["esiti_coperti"])
+    assert dc["confidenza"] == pytest.approx(atteso)
+
+
+def test_doppia_chance_e_sempre_piu_probabile_del_miglior_singolo():
+    # E' il motivo per cui esiste nello strumento: rende giocabile una schedina
+    # lunga dove l'1X2 non arriva. Deve valere su qualunque terna di quote.
+    for quote in [(1.50, 4.00, 7.00), (2.80, 3.30, 2.60), (7.00, 3.90, 1.48),
+                  (1.22, 6.00, 12.00), (2.50, 3.10, 2.80)]:
+        singola = schedina.analizza_partita(*quote)
+        dc = schedina.analizza_doppia_chance(*quote)
+        assert dc["confidenza"] > singola["confidenza"]
+        # ...e sempre a un moltiplicatore piu' basso: non e' un pasto gratis.
+        assert dc["quota_pronostico"] < singola["quota_pronostico"]
+
+
+def test_doppia_chance_accetta_probabilita_del_blend():
+    # In app.py le probabilita' arrivano dal blend modello+mercato, non da Shin:
+    # la funzione deve usarle invece di ricalcolarle dalle quote.
+    r = schedina.analizza_doppia_chance(2.10, 3.40, 3.60, probabilita=[0.10, 0.20, 0.70])
+    assert r["pronostico"] == "X2"
+    assert r["confidenza"] == pytest.approx(0.90)
+
+
+def test_doppia_chance_margine_positivo_su_quote_con_overround():
+    r = schedina.analizza_doppia_chance(1.90, 3.60, 4.20)
+    assert r["margine"] > 0
+    # Su quote eque il margine sparisce.
+    equo = schedina.analizza_doppia_chance(2.0, 4.0, 4.0)
+    assert equo["margine"] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_doppia_chance_rifiuta_quote_non_valide():
+    with pytest.raises(ValueError):
+        schedina.analizza_doppia_chance(1.0, 3.40, 3.60)
+
+
+def test_schedina_puo_mescolare_tutti_e_tre_i_mercati():
+    selezioni = [
+        schedina.analizza_partita(1.50, 4.00, 7.00),
+        schedina.analizza_doppia_chance(2.80, 3.30, 2.60),
+        schedina.analizza_over_under(1.70, 2.15),
+    ]
+    r = schedina.riepiloga_schedina(selezioni)
+    assert r["n_partite"] == 3
+    assert 0 < r["p_tutte"] < 1

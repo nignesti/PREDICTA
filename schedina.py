@@ -22,6 +22,17 @@ Due cose che il calcolo mostra e che non sono ovvie:
    servirebbe un vantaggio informativo sul mercato, che il progetto ha misurato
    non esserci.
 
+3. **Il mercato scelto e' un vincolo sulla lunghezza della schedina, prima che
+   sulla precisione.** L'1X2 ha tre caselle e il pareggio se ne prende
+   stabilmente un quarto: la confidenza mediana del favorito e' 51.4% e solo il
+   30% delle partite arriva al 60% (2.660 partite di Serie A, quote di
+   chiusura). Chiedere una schedina lunga fatta di soli esiti 1X2 sicuri e'
+   chiedere qualcosa che il mercato non contiene — su 266 giornate simulate una
+   da 10 partite non e' mai uscita piena. La doppia chance, ricavabile dalle
+   stesse tre quote senza dati nuovi, sposta la mediana a 78.2% e rende
+   giocabile la giornata intera, al prezzo di un moltiplicatore molto piu'
+   basso. Misure in valida_doppia_chance.py.
+
 Il ritorno atteso calcolato qui e' quindi sempre < 1. Il modulo serve a scegliere
 consapevolmente il punto sulla curva rischio/premio e a sapere in anticipo quanto
 e' improbabile una schedina piena, non a promettere un guadagno.
@@ -32,6 +43,8 @@ from modello import probabilita_shin
 
 ESITI = ("1", "X", "2")
 ESITI_OU = ("Over 2.5", "Under 2.5")
+# Doppia chance: nome dell'esito e indici degli esiti 1X2 che lo fanno vincere.
+DOPPIE_CHANCE = (("1X", (0, 1)), ("12", (0, 2)), ("X2", (1, 2)))
 
 
 def analizza_partita(quota_1, quota_x, quota_2):
@@ -54,6 +67,53 @@ def analizza_partita(quota_1, quota_x, quota_2):
         "margine": sum(1.0 / q for q in quote) - 1.0,
         "mercato": "1X2",
     }
+
+
+def analizza_doppia_chance(quota_1, quota_x, quota_2, probabilita=None):
+    """Il miglior esito di doppia chance (1X, 12, X2) per una partita.
+
+    Non serve nessuna quota in piu' rispetto all'1X2. Dividendo la posta fra i
+    due esiti coperti in proporzione a 1/q, il pagamento e' lo stesso quale che
+    sia dei due a uscire e vale
+
+        q_dc = 1 / (1/q_a + 1/q_b)
+
+    Non e' un'approssimazione della quota che offrirebbe un bookmaker: e' la
+    quota di una doppia chance costruita davvero con due giocate sull'1X2, e
+    porta esattamente lo stesso margine delle due quote di partenza.
+
+    `probabilita`: le tre probabilita' 1X2 gia' calcolate (ad es. il blend con
+    il modello statistico). Se assente si usano quelle di Shin dalle quote.
+
+    Perche' esiste questo mercato nello strumento: su 2.660 partite di Serie A
+    la confidenza mediana del miglior esito 1X2 e' 51.4%, e solo il 30% delle
+    partite arriva al 60%. Una schedina lunga in 1X2 e' quindi fuori portata —
+    su 266 giornate simulate una da 10 partite non e' mai uscita piena — mentre
+    in doppia chance la stessa giornata e' uscita piena 30 volte. Il prezzo e'
+    un moltiplicatore molto piu' basso: vedi valida_doppia_chance.py."""
+    quote = [float(quota_1), float(quota_x), float(quota_2)]
+    if any(q <= 1.0 for q in quote):
+        raise ValueError("Le quote decimali devono essere maggiori di 1")
+
+    p = list(probabilita) if probabilita is not None else probabilita_shin(quote)
+
+    candidati = []
+    for nome, indici in DOPPIE_CHANCE:
+        q_dc = 1.0 / sum(1.0 / quote[i] for i in indici)
+        p_dc = sum(p[i] for i in indici)
+        candidati.append({
+            "pronostico": nome,
+            "confidenza": p_dc,
+            "quota_pronostico": q_dc,
+            # Stessa definizione di margine usata in analizza_partita
+            # (probabilita' implicita / probabilita' vera - 1), qui ristretta
+            # ai due esiti coperti: sull'intero mercato 1X2 le probabilita'
+            # vere sommano a 1 e la formula si riduce a sum(1/q) - 1.
+            "margine": sum(1.0 / quote[i] for i in indici) / p_dc - 1.0,
+            "mercato": "Doppia chance",
+            "esiti_coperti": tuple(ESITI[i] for i in indici),
+        })
+    return max(candidati, key=lambda c: c["confidenza"])
 
 
 def analizza_over_under(quota_over, quota_under, prob_over_modello=None, peso_quote=1.0):

@@ -271,6 +271,36 @@ Una nota di realismo su tutte e quattro: il mercato delle scommesse su Serie A �
 
 ---
 
+## Doppia chance: perché il costruttore di schedina ne selezionava 3 su 10 ✅
+
+**Segnalazione.** Inserite le 10 partite di una giornata di campionato nel costruttore di schedina, con la soglia di confidenza al default (60%), la schedina che esce ha 3-4 partite. Sembra un dato mancante o un filtro rotto.
+
+**Non lo è: è il valore atteso.** Misurato in `valida_doppia_chance.py` su 2.660 partite di Serie A con quote di chiusura (2019-2026), la confidenza mediana del miglior esito 1X2 è **51.4%**, e solo il **30.1%** delle partite arriva al 60%. Su una giornata da 10 ne passano 3.0 in media — esattamente quello che l'utente ha visto. La causa è strutturale, non modellistica: un mercato a tre caselle in cui il pareggio se ne prende stabilmente circa un quarto lascia al favorito un tetto pratico molto più basso di quanto suggerisca l'intuizione. Nessun miglioramento del modello sposta questo numero, perché non è una previsione: è la forma del mercato.
+
+**Conseguenza pratica, non ovvia:** una schedina lunga fatta di soli esiti 1X2 ad alta confidenza è qualcosa che il mercato non contiene. Su 266 giornate simulate, una schedina da 10 partite in 1X2 non è **mai** uscita piena (0 volte, 0.5 attese).
+
+**Adottato: la doppia chance (1X, 12, X2).** Non richiede nessun dato nuovo — si ricava dalle tre quote 1X2 già inserite. Dividendo la posta fra i due esiti coperti in proporzione a `1/q`, il pagamento è identico quale che sia dei due a uscire e vale `q_dc = 1/(1/q_a + 1/q_b)`: non è la stima della quota che offrirebbe un bookmaker, è la quota di una doppia chance costruita davvero con due giocate sull'1X2, con lo stesso margine delle quote di partenza. La probabilità è la somma delle due probabilità di Shin già calcolate.
+
+Risultati (266 giornate, `valida_doppia_chance.py`):
+
+| | confidenza mediana | schedina da 3 piena | schedina da 10 piena |
+|---|---|---|---|
+| solo 1X2 | 51.4% | 32.0% (89/266) | 0.2% — **0/266** |
+| + doppia chance | 78.2% | 67.9% (186/266) | 9.7% — 30/266 |
+
+Calibrazione verificata prima di adottarla, perché senza quella tutte le metriche di schedina mostrate in pagina sarebbero ottimistiche per costruzione: **Brier 0.1905, identico all'1X2**, scarti fra probabilità dichiarata e frequenza osservata entro 3.4 punti su tutte le fasce.
+
+**Due ipotesi di questo lavoro sono state falsificate dalla misura, ed è la parte che vale la pena ricordare:**
+
+1. *«La doppia chance dovrebbe costare meno: per la favorite-longshot bias già modellata da Shin, coprire favorito + pareggio evita la casella più caricata di margine.»* — **Falso.** Il ritorno realizzato per singola giocata sta fra il 92% e il 98% su tutti e sei i tipi di esito, differenze dentro il rumore. La doppia chance non è più economica, è solo più probabile.
+2. *«Prendere sempre l'esito più probabile è uno spreco: ammessa la doppia chance vince ovunque, e su un Inter-Monza da 1.22 si finisce a giocare 1X a quota 1.01, una gamba che può solo far perdere. Meglio, fra gli esiti sopra soglia, quello che paga di più.»* — **Falso che sia meglio.** Le due regole hanno lo stesso ritorno atteso a ogni soglia (66.5% contro 65.6% a soglia 60%). Cambia solo la forma del rischio: 30 schedine piene a moltiplicatore mediano 7x contro 6 schedine piene a 24.5x. Nessuna domina, quindi in pagina sono entrambe disponibili come scelta esplicita ("Con più esiti sopra soglia, gioca").
+
+È la conferma più netta della tesi in cima a `schedina.py`: **la selezione sposta il punto sulla curva rischio/premio, non la curva.** Il ritorno atteso resta sotto il 100% ovunque e peggiora man mano che si aggiungono partite, perché ogni gamba paga il suo margine.
+
+**In produzione:** `schedina.analizza_doppia_chance()`, il mercato aggiunto al selettore di `app.py` (multiselect, default invariato `1X2 + Over/Under` per non cambiare il comportamento esistente), e un avviso in pagina che spiega il "3 su 10" quando succede invece di lasciarlo sembrare un bug. Test in `tests/test_schedina.py`, inclusa la verifica che la quota della doppia chance sia davvero realizzabile con due giocate 1X2 — se quell'identità si rompe, il moltiplicatore mostrato prometterebbe più di quanto si incassi.
+
+---
+
 ## Fase 1 — Completata ✅
 
 Vedi la sezione "📊 Risultati Backtesting" nel [readme.md](readme.md) per i dettagli. In sintesi:
