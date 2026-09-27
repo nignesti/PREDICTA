@@ -80,7 +80,7 @@ with st.sidebar:
     st.logo("serie_a_logo.svg", size="large")
 
     st.markdown("### :material/tune: Pesi del modello")
-    with st.container(border=True):
+    with st.container(border=True, key="depth_1"):
         peso_forma = st.slider(
             "Forma recente", 0.0, 1.0, 0.0, 0.05,
             help="Rendimento nelle ultime 3 partite di ciascuna squadra. Default 0: nella ricerca "
@@ -104,7 +104,7 @@ with st.sidebar:
             st.caption(f"Storico (media pesata nel tempo): **{peso_storico:.0%}**")
 
     st.markdown("### :material/receipt_long: Composizione")
-    with st.container(border=True):
+    with st.container(border=True, key="depth_2"):
         soglia = st.slider(
             "Confidenza minima", 0.35, 0.85, 0.60, 0.05,
             help="Include solo le partite in cui l'esito piu' probabile supera questa soglia. "
@@ -155,7 +155,7 @@ st.markdown(
 
 st.space("medium")
 
-with st.container(border=True):
+with st.container(border=True, key="depth_3"):
     col_a, col_b = st.columns([3, 1], vertical_alignment="bottom")
     with col_a:
         st.markdown("**1. Partite e quote**")
@@ -335,23 +335,23 @@ riepilogo = sc.riepiloga_schedina(selezionate)
 st.markdown("### 2. La tua schedina")
 c1, c2, c3, c4 = st.columns(4, gap="medium")
 with c1:
-    with st.container(border=True):
+    with st.container(border=True, key="depth_4"):
         st.markdown(f"## {riepilogo['n_partite']}")
         st.caption("Partite selezionate")
         st.badge(f"su {len(partite)} inserite", color="gray")
 with c2:
-    with st.container(border=True):
+    with st.container(border=True, key="depth_5"):
         st.markdown(f"## {riepilogo['moltiplicatore']:,.0f}x".replace(",", "."))
         st.caption("Moltiplicatore")
         st.badge("quota totale", color="blue")
 with c3:
-    with st.container(border=True):
+    with st.container(border=True, key="depth_6"):
         st.markdown(f"## {riepilogo['p_tutte']:.2%}")
         st.caption("Probabilità schedina piena")
         st.badge(f"1 su {riepilogo['una_su']:,.0f}".replace(",", "."), color="orange")
 with c4:
     ritorno = riepilogo["ritorno_atteso"]
-    with st.container(border=True):
+    with st.container(border=True, key="depth_7"):
         st.markdown(f"## {ritorno:.0%}")
         st.caption("Ritorno atteso")
         st.badge("per ogni euro giocato", color="red" if ritorno < 1 else "green")
@@ -368,7 +368,7 @@ st.space("medium")
 col_sx, col_dx = st.columns([3, 2], gap="medium")
 
 with col_sx:
-    with st.container(border=True):
+    with st.container(border=True, key="depth_8"):
         st.markdown("**Pronostici selezionati**")
         st.dataframe(pd.DataFrame([{
             "Partita": f"{p['casa']} – {p['trasferta']}",
@@ -388,7 +388,7 @@ with col_sx:
         )
 
 with col_dx:
-    with st.container(border=True):
+    with st.container(border=True, key="depth_9"):
         st.markdown("**Quanti ne azzecchi, realisticamente**")
         distribuzione = riepilogo["distribuzione"]
         n = riepilogo["n_partite"]

@@ -392,26 +392,26 @@ if st.sidebar.button(":material/play_arrow: Esegui backtesting", width="stretch"
         col_m1, col_m2, col_m3, col_m4 = st.columns(4, gap="medium")
 
         with col_m1:
-            with st.container(border=True):
+            with st.container(border=True, key="depth_1"):
                 st.markdown(f"## {acc:.1%}")
                 st.caption("Accuratezza 1X2")
                 st.badge("✅ Sopra benchmark" if acc > benchmark else "❌ Sotto benchmark", color="green" if acc > benchmark else "red")
 
         with col_m2:
             corrette = sum(1 for p, r in zip(predizioni, reali) if p == r)
-            with st.container(border=True):
+            with st.container(border=True, key="depth_2"):
                 st.markdown(f"## {corrette}/{len(reali)}")
                 st.caption("Partite indovinate")
                 st.badge(f"Benchmark: {benchmark:.0%}", color="gray")
 
         with col_m3:
-            with st.container(border=True):
+            with st.container(border=True, key="depth_3"):
                 st.markdown(f"## {rps_medio:.3f}")
                 st.caption("RPS medio")
                 st.badge("0 = perfetto", color="blue")
 
         with col_m4:
-            with st.container(border=True):
+            with st.container(border=True, key="depth_4"):
                 st.markdown(f"## {logloss:.3f}")
                 st.caption("Log-loss")
                 st.badge("Più basso = meglio", color="orange")
@@ -424,7 +424,7 @@ if st.sidebar.button(":material/play_arrow: Esegui backtesting", width="stretch"
         col_cm1, col_cm2 = st.columns([3, 2], gap="medium")
 
         with col_cm1:
-            with st.container(border=True):
+            with st.container(border=True, key="depth_5"):
                 st.markdown("**Matrice di confusione**")
                 fig_cm = go.Figure(data=go.Heatmap(
                     z=cm,
@@ -443,7 +443,7 @@ if st.sidebar.button(":material/play_arrow: Esegui backtesting", width="stretch"
                 st.plotly_chart(fig_cm, width='stretch')
 
         with col_cm2:
-            with st.container(border=True):
+            with st.container(border=True, key="depth_6"):
                 st.markdown("**Metriche per classe**")
                 metrics_df = pd.DataFrame({
                     "Classe": ["1 (Casa)", "X (Pareggio)", "2 (Trasferta)"],
@@ -454,7 +454,7 @@ if st.sidebar.button(":material/play_arrow: Esegui backtesting", width="stretch"
                 })
                 st.dataframe(metrics_df, hide_index=True, width="stretch")
 
-            with st.container(border=True):
+            with st.container(border=True, key="depth_7"):
                 st.markdown("**Precision / Recall / F1**")
                 fig_pr = go.Figure()
                 fig_pr.add_trace(go.Bar(name="Precision", x=["1", "X", "2"], y=precision,
@@ -473,7 +473,7 @@ if st.sidebar.button(":material/play_arrow: Esegui backtesting", width="stretch"
         # Accuratezza per stagione (solo se multistagione)
         if n_stagioni_test > 1:
             st.space("medium")
-            with st.container(border=True):
+            with st.container(border=True, key="depth_8"):
                 st.markdown("**Accuratezza per stagione**")
                 df_ris = pd.DataFrame({"Stagione": stagioni_pred, "corretta": [p == r for p, r in zip(predizioni, reali)]})
                 breakdown = df_ris.groupby("Stagione")["corretta"].mean().reset_index()

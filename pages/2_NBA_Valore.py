@@ -43,14 +43,14 @@ def _carica_snapshot():
 
 with st.sidebar:
     st.markdown("### :material/tune: Richiesta")
-    with st.container(border=True):
+    with st.container(border=True, key="depth_1"):
         mercati = st.multiselect(
             "Mercati", list(NOMI_MERCATI), default=list(NOMI_MERCATI),
             format_func=NOMI_MERCATI.get,
             help="Ogni mercato costa 1 credito per aggiornamento (regione eu, dove sta Pinnacle).")
         st.caption(f"Costo per aggiornamento: **{len(mercati)} crediti**")
     st.markdown("### :material/filter_alt: Filtri")
-    with st.container(border=True):
+    with st.container(border=True, key="depth_2"):
         soglia_ev = st.slider("Valore atteso minimo", 0.0, 0.10, 0.02, 0.005, format="%.3f",
                               help="EV = probabilità equa × quota − 1. Sotto il 2% il vantaggio "
                                    "è dello stesso ordine dell'errore sulla probabilità equa.")
@@ -61,7 +61,7 @@ with st.sidebar:
 
 def mostra_clv():
     """Sezione CLV: legge solo gli snapshot gia' raccolti, nessun credito."""
-    with st.container(border=True):
+    with st.container(border=True, key="depth_3"):
         st.markdown("**3. Verifica: le segnalazioni battono la chiusura? (CLV)**")
         snapshot = _carica_snapshot()
         clv, linea_mossa = clv_nba.calcola_clv(snapshot, soglia_ev=soglia_ev) if not snapshot.empty else (pd.DataFrame(), 0)
@@ -161,7 +161,7 @@ for p in partite.itertuples(index=False):
     riga["Fonte"] = " · ".join(sorted(fonti)) or "—"
     righe.append(riga)
 
-with st.container(border=True):
+with st.container(border=True, key="depth_4"):
     st.markdown("**1. Probabilità eque (senza margine)**")
     st.dataframe(pd.DataFrame(righe), hide_index=True, width="stretch")
     st.caption("La **quota equa** è la minima da accettare sul tuo bookmaker: se paga di più, "
@@ -174,7 +174,7 @@ st.space("medium")
 
 # --- Valore ---
 valore = ql.trova_valore(tabella, soglia_ev=soglia_ev, frazione_kelly=kelly)
-with st.container(border=True):
+with st.container(border=True, key="depth_5"):
     st.markdown("**2. Quote a valore fra i bookmaker europei**")
     if valore.empty:
         st.info(f":material/check: Nessuna quota sopra il {soglia_ev:.1%} di valore atteso. "

@@ -26,7 +26,17 @@ def _password_corretta():
 
 
 if not st.session_state.get("autenticato", False):
-    st.set_page_config(page_title="PredictA — Accesso", page_icon=":material/lock:", layout="centered")
+    st.set_page_config(
+        page_title="PredictA — Accesso",
+        page_icon=":material/lock:",
+        layout="centered",
+        initial_sidebar_state="collapsed",
+    )
+    st.markdown(
+        "<style>[data-testid='stSidebar'], [data-testid='stSidebarCollapsedControl'] "
+        "{display: none;}</style>",
+        unsafe_allow_html=True,
+    )
     st.space("large")
     st.title("PredictA", text_alignment="center")
     st.markdown("Inserisci la password per continuare.", text_alignment="center")
@@ -42,6 +52,45 @@ if not st.session_state.get("autenticato", False):
             else:
                 st.error(":material/error: Password errata.")
     st.stop()
+
+st.markdown(
+    """
+    <style>
+    /* Card con hover e bagliore alla Linear */
+    .card-serie-a {
+      background: #18191c;
+      border: 1px solid #ffffff10;
+      transition: all 0.2s ease;
+    }
+
+    .card-serie-a:hover {
+      border-color: #0080ff;
+      box-shadow: 0 0 20px rgba(0, 128, 255, 0.15);
+    }
+
+    /* Badge valore / quota */
+    .badge-value {
+      background-color: rgba(38, 165, 68, 0.15);
+      color: #3de261;
+      border: 1px solid rgba(61, 226, 97, 0.3);
+      border-radius: 9999px;
+      padding: 2px 8px;
+      font-size: 12px;
+    }
+
+    /* Profondita' per tutti i container bordati (st.container(border=True, key="depth_*")) */
+    [class*="st-key-depth-"] {
+      box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.03);
+      transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+    }
+    [class*="st-key-depth-"]:hover {
+      border-color: #5e69d1;
+      box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.03), 0 0 16px rgba(94, 105, 209, 0.12);
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 home = st.Page("pages/home.py", title="Home", icon=":material/home:", default=True)
 
