@@ -24,7 +24,7 @@ import modello_nba
 import protocollo
 import unisci_quote_nba
 
-STAGIONI_TEST = 3
+STAGIONI_TEST = 7  # come protocollo.py per il calcio: piu' stagioni, piu' potenza statistica
 COPERTURA_MINIMA_MERCATO = 0.9
 
 
@@ -58,26 +58,81 @@ def probabilita_mercato(moneyline_home, moneyline_away):
     return p_casa / (p_casa + p_trasferta)
 
 
-def stagioni_test_con_mercato(df_elo, n=STAGIONI_TEST, copertura_minima=COPERTURA_MINIMA_MERCATO):
-    """Le ultime n stagioni con copertura moneyline sufficiente, non le ultime
-    n a calendario: la fonte delle quote copre al 100% dal 2010 al 2022, poi
-    scende al 50% nel 2023 e si azzera dal 2024 (probabile fine del feed) -
-    prendere le ultime 3 a calendario metterebbe nel test proprio le stagioni
-    senza mercato con cui confrontarsi."""
-    copertura = df_elo.groupby("Stagione")["moneyline_home"].apply(lambda s: s.notna().mean())
+def spread_casa_segnato(df):
+    """Spread nel file e' sempre un numero positivo (il margine del
+    favorito), con 'whos_favored' a dire chi e' favorito: lo riconverte nella
+    convenzione standard (negativo se la casa e' favorita, es. -4.5)."""
+    segno = np.where(df["whos_favored"] == "home", -1.0, 1.0)
+    return segno * df["spread"].to_numpy(dtype=float)
+
+
+def calibra_mercato_da_spread(df):
+    """Regressione lineare logit(probabilita' di mercato reale) ~ spread
+    firmato, calibrata su TUTTE le partite dove il moneyline reale e'
+    disponibile (2010 - 16/1/2023, ~17.100 partite): serve a ricostruire una
+    proxy di probabilita' di mercato per le partite successive, dove il feed
+    moneyline si e' fermato ma lo spread resta coperto al 100%.
+
+    Niente split train/test qui: le partite su cui verra' applicata (dal
+    17/1/2023 in poi) non hanno mai moneyline, quindi non c'e' overlap con
+    i dati di calibrazione e nessun rischio di leakage."""
+    from sklearn.linear_model import LinearRegression
+
+    con_moneyline = df["moneyline_home"].notna() & df["moneyline_away"].notna() & df["spread"].notna()
+    sotto = df[con_moneyline]
+    p_reale = probabilita_mercato(sotto["moneyline_home"], sotto["moneyline_away"])
+    spread_segnato = spread_casa_segnato(sotto)
+
+    logit_p = np.log(p_reale / (1 - p_reale))
+    X = spread_segnato.reshape(-1, 1)
+    modello = LinearRegression().fit(X, logit_p)
+    print(f"Mercato-da-spread calibrato su {len(sotto):,} partite (R^2 = {modello.score(X, logit_p):.3f})")
+    return modello
+
+
+def probabilita_mercato_da_spread(modello, spread_segnato):
+    X = np.asarray(spread_segnato, dtype=float).reshape(-1, 1)
+    logit_p = modello.predict(X)
+    return 1.0 / (1.0 + np.exp(-logit_p))
+
+
+def stagioni_test_con_spread(df_elo, n=STAGIONI_TEST, copertura_minima=COPERTURA_MINIMA_MERCATO):
+    """Le ultime n stagioni con copertura spread sufficiente (in pratica
+    tutte tranne l'inizio dello storico, dove pure lo spread ha buchi
+    sporadici): a differenza del moneyline, lo spread resta coperto al 100%
+    anche dopo l'interruzione del 17/1/2023, quindi la proxy di mercato
+    permette di valutare su un campione molto piu' ampio delle sole
+    stagioni con moneyline reale."""
+    copertura = df_elo.groupby("Stagione")["spread"].apply(lambda s: s.notna().mean())
     idonee = sorted(s for s in copertura.index if copertura[s] >= copertura_minima)
     scartate = sorted(set(copertura.index) - set(idonee))
     if scartate:
-        print(f"Stagioni escluse per copertura moneyline < {copertura_minima:.0%}: {scartate}")
+        print(f"Stagioni escluse per copertura spread < {copertura_minima:.0%}: {scartate}")
     return set(idonee[-n:])
+
+
+def probabilita_mercato_completo(df, modello_spread):
+    """Probabilita' di mercato per ogni riga: moneyline reale quando c'e',
+    altrimenti la proxy ricostruita dallo spread (calibra_mercato_da_spread).
+    Copre l'intero storico, non solo le partite fino al 17/1/2023."""
+    con_moneyline = df["moneyline_home"].notna().to_numpy() & df["moneyline_away"].notna().to_numpy()
+    prob = np.empty(len(df))
+    prob[con_moneyline] = probabilita_mercato(
+        df.loc[con_moneyline, "moneyline_home"], df.loc[con_moneyline, "moneyline_away"]
+    )
+    prob[~con_moneyline] = probabilita_mercato_da_spread(
+        modello_spread, spread_casa_segnato(df[~con_moneyline])
+    )
+    return prob, con_moneyline
 
 
 def main():
     df = carica_storico()
     df_elo, rating_finali = modello_nba.calcola_elo_storico(df)
+    modello_spread = calibra_mercato_da_spread(df_elo)
 
     stagioni_ordinate = sorted(df_elo["Stagione"].unique())
-    stagioni_test = stagioni_test_con_mercato(df_elo)
+    stagioni_test = stagioni_test_con_spread(df_elo)
     train = df_elo[~df_elo["Stagione"].isin(stagioni_test)]
     test = df_elo[df_elo["Stagione"].isin(stagioni_test)]
     print(f"Train: {len(train):,} partite ({len(stagioni_ordinate) - len(stagioni_test)} stagioni)")
@@ -98,18 +153,14 @@ def main():
         )
     ]
 
-    con_quota = test["moneyline_home"].notna().to_numpy() & test["moneyline_away"].notna().to_numpy()
-    if con_quota.any():
-        test_quota = test[con_quota]
-        prob_elo_quota = prob_elo[con_quota]
-        prob_mercato = probabilita_mercato(test_quota["moneyline_home"], test_quota["moneyline_away"])
-        esiti_quota = (test_quota["Winner"] == "H").to_numpy()
-        esiti_da_confrontare.append(
-            protocollo.confronta_binario(
-                "Elo calibrato", prob_elo_quota, "Mercato (moneyline)", prob_mercato, esiti_quota
-            )
+    prob_mercato, con_moneyline_reale = probabilita_mercato_completo(test, modello_spread)
+    esiti_da_confrontare.append(
+        protocollo.confronta_binario(
+            "Elo calibrato", prob_elo, "Mercato (moneyline + proxy da spread)", prob_mercato, esiti
         )
-        print(f"({con_quota.sum():,}/{len(test):,} partite di test con moneyline disponibile)")
+    )
+    print(f"({con_moneyline_reale.sum():,}/{len(test):,} partite di test con moneyline reale, "
+          f"il resto usa la proxy da spread)")
 
     print()
     protocollo.riepiloga(esiti_da_confrontare)
