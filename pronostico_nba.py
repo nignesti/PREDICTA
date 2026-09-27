@@ -49,14 +49,38 @@ def load_data():
 def prepara_modello():
     """Calcola una sola volta per sessione l'intero storico Elo (walk-forward,
     nessun lookahead per costruzione) e le calibrazioni che ne dipendono:
-    costoso da rifare a ogni interazione con gli slider."""
+    costoso da rifare a ogni interazione con gli slider.
+
+    Le calibrazioni usano solo le ultime mn.STAGIONI_CALIBRAZIONE stagioni
+    (stessa finestra mobile validata in valida_nba.py): il vantaggio campo
+    NBA non e' stabile nel tempo."""
     df = load_data()
     df_elo, rating_finali = mn.calcola_elo_storico(df)
-    modello_moneyline = mn.calibra_probabilita(df_elo["EloDiff"], df_elo["Winner"] == "H")
+    recenti = mn.stagioni_precedenti(df_elo, int(df_elo["Stagione"].max()) + 1)
+    modello_moneyline = mn.calibra_probabilita(recenti["EloDiff"], recenti["Winner"] == "H")
     modello_margine, sigma_margine = mn.calibra_margine(
-        df_elo["EloDiff"], df_elo["PTS_Home"] - df_elo["PTS_Away"])
-    sigma_totale = float((df_elo["PTS_Home"] + df_elo["PTS_Away"]).std())
+        recenti["EloDiff"], recenti["PTS_Home"] - recenti["PTS_Away"])
+    totale_atteso = mn.totale_atteso_storico(df_elo)
+    sigma_totale = mn.sigma_residui(totale_atteso[recenti.index],
+                                    recenti["PTS_Home"] + recenti["PTS_Away"])
     return df_elo, rating_finali, modello_moneyline, modello_margine, sigma_margine, sigma_totale
+
+
+def rating_per_data(data=None):
+    """Rating da usare per una partita giocata in 'data' (default: oggi). Se
+    cade in una stagione successiva all'ultima dello storico (es. a settembre,
+    con lo storico fermo alla finale di giugno), applica la regressione
+    d'inizio stagione che calcola_elo_storico applicherebbe alla prima partita
+    della stagione nuova: senza, i rating di fine stagione verrebbero usati
+    come se le rose non fossero cambiate in estate.
+
+    Restituisce (rating, regressione_applicata, ultima_partita)."""
+    df_elo, rating = prepara_modello()[:2]
+    ultima_partita = pd.Timestamp(df_elo["Date"].max())
+    data = pd.Timestamp.today().normalize() if data is None else pd.Timestamp(data)
+    if mn.stagione_di(data) > int(df_elo["Stagione"].max()):
+        return mn.regredisci_verso_media(rating), True, ultima_partita
+    return rating, False, ultima_partita
 
 
 def squadre_disponibili():
@@ -77,11 +101,13 @@ def _media_punti_totali(df_elo, squadra, ultime_n=PARTITE_FINESTRA_TOTALE):
     return float((partite["PTS_Home"] + partite["PTS_Away"]).mean())
 
 
-def stima_probabilita_nba(squadra_casa, squadra_trasferta):
+def stima_probabilita_nba(squadra_casa, squadra_trasferta, data=None):
     """Stime pure-modello per moneyline (probabilita' vittoria casa), spread
     (margine atteso + deviazione standard) e totale (punti attesi + deviazione
-    standard). Restituisce None se una delle due squadre non e' nello storico."""
-    df_elo, rating, modello_moneyline, modello_margine, sigma_margine, sigma_totale = prepara_modello()
+    standard). Restituisce None se una delle due squadre non e' nello storico.
+    'data' e' la data della partita (default oggi), vedi rating_per_data."""
+    df_elo, _, modello_moneyline, modello_margine, sigma_margine, sigma_totale = prepara_modello()
+    rating, _, _ = rating_per_data(data)
 
     if squadra_casa not in rating or squadra_trasferta not in rating:
         return None

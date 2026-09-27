@@ -25,6 +25,7 @@ import streamlit as st
 
 import modello_nba as mn
 import pronostico_nba as pn
+import quote_live_nba
 import schedina as sc
 import schedina_nba as sn
 import unisci_quote_nba
@@ -104,14 +105,16 @@ with st.sidebar:
     st.markdown("### :material/tune: Peso del modello")
     with st.container(border=True):
         peso_quote = st.slider(
-            "Quote bookmaker", 0.0, 1.0, 1.0, 0.05,
-            help="Peso delle quote che inserisci rispetto al rating Elo. Default 1.0: "
+            "Quote bookmaker (moneyline)", 0.0, 1.0, 1.0, 0.05,
+            help="Peso delle quote moneyline che inserisci rispetto al rating Elo. Default 1.0: "
                  "misurato su 8.919 partite di 7 stagioni (valida_nba.py, walk-forward, "
                  "moneyline reale + proxy da spread dove il moneyline manca), l'Elo calibrato "
-                 "batte 'vince sempre la casa' ma perde contro il mercato (RPS peggiore di "
-                 "+0.012, accuratezza -2.78 punti). Stessa conclusione del calcio (ROADMAP.md): "
+                 "batte 'vince sempre la casa' ma perde contro il mercato (Brier peggiore di "
+                 "+0.011, accuratezza -2.62 punti). Stessa conclusione del calcio (ROADMAP.md): "
                  "il mercato resta il miglior previsore disponibile.")
-        st.caption(f"Rating Elo: **{1 - peso_quote:.0%}**")
+        st.caption(f"Rating Elo: **{1 - peso_quote:.0%}**. Spread e totale usano sempre e solo "
+                   "le quote: sullo storico i modelli di quei due mercati fanno peggio di una "
+                   "moneta (valida_nba.py).")
 
     st.markdown("### :material/receipt_long: Composizione")
     with st.container(border=True):
@@ -134,6 +137,13 @@ st.markdown(
     text_alignment="center",
 )
 
+_, regressione_applicata, ultima_partita = pn.rating_per_data()
+if regressione_applicata:
+    st.info(f":material/update: Storico fermo al {ultima_partita:%d/%m/%Y}, prima della stagione in corso: "
+            "i rating Elo sono regrediti di 1/3 verso la media per le rose cambiate in estate. "
+            "Scambi e infortuni della offseason non sono nel modello: nelle prime settimane "
+            "affidati alle quote.")
+
 st.space("medium")
 
 with st.container(border=True):
@@ -145,16 +155,29 @@ with st.container(border=True):
                    "vuote quelle dei mercati che non ti interessano. Aggiungi righe con il + in "
                    "fondo alla tabella.")
     with col_b:
-        usa_esempio = st.toggle("Precarica un esempio", value=False)
+        fonti = ["Nessuna", "Esempio storico"]
+        if "quote_live_nba" in st.session_state:
+            fonti.append("Quote live (Pinnacle)")
+        precarica = st.selectbox(
+            "Precarica", fonti,
+            help="Le quote live compaiono qui dopo averle scaricate nella pagina "
+                 "'Quote live e valore' (nessun credito in più).")
 
-    partenza = giornata_di_esempio(max_partite) if usa_esempio else tabella_vuota(max_partite)
+    if precarica == "Esempio storico":
+        partenza = giornata_di_esempio(max_partite)
+    elif precarica == "Quote live (Pinnacle)":
+        partenza = quote_live_nba.quote_sharp_per_schedina(
+            quote_live_nba.quote_in_tabella(st.session_state.quote_live_nba[0])
+        ).reindex(columns=COLONNE)
+    else:
+        partenza = tabella_vuota(max_partite)
 
     inserite = st.data_editor(
         partenza,
         num_rows="dynamic",
         width="stretch",
         hide_index=True,
-        key=f"editor_nba_{usa_esempio}_{max_partite}",
+        key=f"editor_nba_{precarica}_{max_partite}",
         column_config={
             "Casa": st.column_config.SelectboxColumn("Casa", options=SQUADRE, width="small"),
             "Trasferta": st.column_config.SelectboxColumn("Trasferta", options=SQUADRE, width="small"),
@@ -249,9 +272,12 @@ for numero, (_, riga) in enumerate(inserite.iterrows(), start=1):
         p_copre_modello = mn.probabilita_copre_spread(modello["margine_atteso"], modello["sigma_margine"], linea_spread)
         esito_casa = f"{casa} {linea_spread:+.1f}"
         esito_trasferta = f"{trasferta} {-linea_spread:+.1f}"
-        sp = sn.analizza_mercato_due_vie(sn.SPREAD, esito_casa, esito_trasferta, q1, q2,
-                                         prob_1_modello=p_copre_modello, peso_quote=peso_quote)
-        sp_mercato = sn.analizza_mercato_due_vie(sn.SPREAD, esito_casa, esito_trasferta, q1, q2)
+        # Niente blend: sul test 2020-2026 il modello Elo->margine ha Brier
+        # peggiore di una probabilita' fissa al 50% (valida_nba.confronto_spread),
+        # quindi mescolarlo alle quote puo' solo peggiorarle. Resta mostrato
+        # nella colonna "Solo modello" come riferimento.
+        sp = sn.analizza_mercato_due_vie(sn.SPREAD, esito_casa, esito_trasferta, q1, q2)
+        sp_mercato = sp
         candidati.append(dict(comune, mercato=sn.SPREAD,
                               pronostico=sp["pronostico"], confidenza=sp["confidenza"],
                               quota_pronostico=sp["quota_pronostico"], margine=sp["margine"],
@@ -266,9 +292,9 @@ for numero, (_, riga) in enumerate(inserite.iterrows(), start=1):
         q1, q2 = float(riga["Quota Over"]), float(riga["Quota Under"])
         p_over_modello = mn.probabilita_over_totale(modello["totale_atteso"], modello["sigma_totale"], linea_totale)
         esito_over, esito_under = f"Over {linea_totale:g}", f"Under {linea_totale:g}"
-        tt = sn.analizza_mercato_due_vie(sn.TOTALE, esito_over, esito_under, q1, q2,
-                                         prob_1_modello=p_over_modello, peso_quote=peso_quote)
-        tt_mercato = sn.analizza_mercato_due_vie(sn.TOTALE, esito_over, esito_under, q1, q2)
+        # Niente blend, stesso motivo dello spread (valida_nba.confronto_totale).
+        tt = sn.analizza_mercato_due_vie(sn.TOTALE, esito_over, esito_under, q1, q2)
+        tt_mercato = tt
         candidati.append(dict(comune, mercato=sn.TOTALE,
                               pronostico=tt["pronostico"], confidenza=tt["confidenza"],
                               quota_pronostico=tt["quota_pronostico"], margine=tt["margine"],
@@ -361,7 +387,8 @@ with col_sx:
         } for p in selezionate]), hide_index=True, width="stretch")
         st.caption(
             "**Solo mercato** è ciò che dicono le sole quote; **solo modello** è ciò che dice "
-            "il rating Elo senza le quote. La colonna Confidenza è il blend dei due."
+            "il rating Elo senza le quote. La colonna Confidenza è il blend dei due per il "
+            "moneyline, le sole quote per spread e totale."
         )
 
 with col_dx:

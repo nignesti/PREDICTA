@@ -19,6 +19,7 @@ import os
 
 import numpy as np
 import pandas as pd
+from scipy.stats import norm
 
 import modello_nba
 import protocollo
@@ -126,6 +127,57 @@ def probabilita_mercato_completo(df, modello_spread):
     return prob, con_moneyline
 
 
+def probabilita_elo_walk_forward(df_elo, stagioni_test):
+    """Probabilita' Elo calibrata stagione per stagione sulle
+    STAGIONI_CALIBRAZIONE precedenti (finestra mobile), come fa l'app in
+    produzione: una calibrazione unica sulle stagioni pre-2020 sovrastima il
+    vantaggio campo, sceso da ~59% a ~55% di vittorie in casa."""
+    prob = pd.Series(np.nan, index=df_elo.index)
+    for stagione in sorted(stagioni_test):
+        train = modello_nba.stagioni_precedenti(df_elo, stagione)
+        riga = df_elo["Stagione"] == stagione
+        modello = modello_nba.calibra_probabilita(train["EloDiff"], train["Winner"] == "H")
+        prob[riga] = modello_nba.probabilita_calibrata(modello, df_elo.loc[riga, "EloDiff"])
+    return prob
+
+
+def confronto_spread(df_elo, stagioni_test):
+    """Il modello Elo->margine (calibra_margine) contro la linea spread del
+    mercato, che per costruzione da' ~50% a entrambi i lati. Esclude i push
+    (margine esattamente uguale alla linea): nessun vincitore."""
+    prob, esiti = [], []
+    for stagione in sorted(stagioni_test):
+        train = modello_nba.stagioni_precedenti(df_elo, stagione).dropna(subset=["spread"])
+        test = df_elo[df_elo["Stagione"] == stagione].dropna(subset=["spread"])
+        modello_margine, sigma = modello_nba.calibra_margine(
+            train["EloDiff"], train["PTS_Home"] - train["PTS_Away"])
+        atteso = modello_nba.margine_atteso(modello_margine, test["EloDiff"])
+        copertura = (test["PTS_Home"] - test["PTS_Away"]).to_numpy() + spread_casa_segnato(test)
+        valide = copertura != 0
+        prob.extend(norm.cdf((atteso + spread_casa_segnato(test)) / sigma)[valide])
+        esiti.extend(copertura[valide] > 0)
+    return protocollo.confronta_binario(
+        "Modello spread (Elo)", prob, "Linea spread (50%)", np.full(len(esiti), 0.5), esiti)
+
+
+def confronto_totale(df_elo, stagioni_test):
+    """Lo stimatore del totale usato dall'app (media ultime 10 partite delle due
+    squadre) contro la linea Over/Under del mercato (~50% a entrambi i lati)."""
+    totale_atteso = modello_nba.totale_atteso_storico(df_elo)
+    totale = df_elo["PTS_Home"] + df_elo["PTS_Away"]
+    prob, esiti = [], []
+    for stagione in sorted(stagioni_test):
+        train = modello_nba.stagioni_precedenti(df_elo, stagione).index
+        sigma = modello_nba.sigma_residui(totale_atteso[train], totale[train])
+        test = df_elo[(df_elo["Stagione"] == stagione) & df_elo["total"].notna() & totale_atteso.notna()]
+        valide = (totale[test.index] != test["total"]).to_numpy()
+        p = norm.cdf((totale_atteso[test.index] - test["total"]) / sigma)
+        prob.extend(np.asarray(p)[valide])
+        esiti.extend((totale[test.index] > test["total"]).to_numpy()[valide])
+    return protocollo.confronta_binario(
+        "Modello totale (media 10)", prob, "Linea totale (50%)", np.full(len(esiti), 0.5), esiti)
+
+
 def main():
     df = carica_storico()
     df_elo, rating_finali = modello_nba.calcola_elo_storico(df)
@@ -137,11 +189,9 @@ def main():
     test = df_elo[df_elo["Stagione"].isin(stagioni_test)]
     print(f"Train: {len(train):,} partite ({len(stagioni_ordinate) - len(stagioni_test)} stagioni)")
     print(f"Test:  {len(test):,} partite ({len(stagioni_test)} stagioni: {sorted(stagioni_test)})")
+    print(f"Calibrazione Elo walk-forward sulle {modello_nba.STAGIONI_CALIBRAZIONE} stagioni precedenti")
 
-    modello_calibrato = modello_nba.calibra_probabilita(
-        train["EloDiff"], train["Winner"] == "H"
-    )
-    prob_elo = modello_nba.probabilita_calibrata(modello_calibrato, test["EloDiff"])
+    prob_elo = probabilita_elo_walk_forward(df_elo, stagioni_test)[test.index].to_numpy()
 
     tasso_casa_train = (train["Winner"] == "H").mean()
     prob_baseline = np.full(len(test), tasso_casa_train)
@@ -161,6 +211,9 @@ def main():
     )
     print(f"({con_moneyline_reale.sum():,}/{len(test):,} partite di test con moneyline reale, "
           f"il resto usa la proxy da spread)")
+
+    esiti_da_confrontare.append(confronto_spread(df_elo, stagioni_test))
+    esiti_da_confrontare.append(confronto_totale(df_elo, stagioni_test))
 
     print()
     protocollo.riepiloga(esiti_da_confrontare)
