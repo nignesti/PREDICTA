@@ -33,7 +33,7 @@ jobs:
         env:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           QUOTE_MERCATI: h2h,spreads,totals
-        run: python raccogli_quote_nba.py
+        run: python -m predicta.nba.quote.raccogli_quote_nba
       - name: Committa lo snapshot
         run: |
           git add quote_live/ || true

@@ -1,8 +1,8 @@
 import pandas as pd
 import pytest
 
-import clv_nba
-import quote_live_nba as ql
+import predicta.nba.quote.clv_nba as clv_nba
+import predicta.nba.quote.quote_live_nba as ql
 from test_quote_live_nba import EVENTI, _book
 
 

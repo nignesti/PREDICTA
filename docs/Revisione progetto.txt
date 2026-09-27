@@ -1,0 +1,96 @@
+Hai già coperto bene il “core” statistico, quindi il prossimo salto non è tanto cambiare modello base quanto **aggiungere segnali che il mercato incorpora male, o con ritardo**, poi farli entrare con shrinkage forte e validazione walk-forward rigorosa. Dal tuo documento emerge anche che alcune strade classiche sono già state testate o scartate, quindi ti propongo solo integrazioni davvero nuove o non ancora implementate, ordinate per impatto/fattibilità. [ppl-ai-file-upload.s3.amazonaws](https://ppl-ai-file-upload.s3.amazonaws.com/web/direct-files/attachments/67443907/dc3d3b7e-23cb-4fc5-96ad-17e5a8ef3a80/Progetto_completo.md.txt?AWSAccessKeyId=ASIA2F3EMEYEQ4B6U7XE&Signature=ZAZLaqV1bS9jn4H4WOy2D%2BGQdg4%3D&x-amz-security-token=IQoJb3JpZ2luX2VjEEAaCXVzLWVhc3QtMSJGMEQCH0LKIyYkr1GipI1eebOirKVYwudhbyTScyf5Nd40PaICIQD8bn%2FIwVJAX6qcwpTjkMwfUP1PoxtZ7c%2FzOwgdRmDxyirzBAgJEAEaDDY5OTc1MzMwOTcwNSIMIs9oJJVFd6a2%2B6KCKtAEG3Ka17v5yp5LrlNUJNCN%2FtpipIU47uAaFVHA%2Bd4Fa%2BqfLahVcynxT0TbJLIVhzDYYVCIQjqLey17%2BtxuxjboDwn%2BcAYD%2BkdQUux0ZC51n6%2Fb2DGYX1unv3qhGqu9QQt9qzG3Q7PYAoW1PibJwNQNQYetajsRsjzd%2BREuhOw3%2BiqhHNagTGMR4igNxfjIYqTdRjCLNHXNMH2u4gk%2FYVK7rGf0r5fs98jtiehkcyj2mmsw82eYcvsfUqf368mmWX79%2BaEJG7bR5%2FOhH3w2QL%2Fv%2BNCafRgUKICLvXHQzA3iThZQ5XHjT01E6MB0y4laTrEHxbotT8r4YecRmXcFrtrm%2BbV71r52XmlVe5y5qm9snpb89PV1%2BSplMaJCatdJwr0kC6Cmfr%2BkF%2B64dUov8opGHeLzLP4%2Fp8I52XjVRM5rllkQ6MFSB2D65BYLcL9tJXmHE7j77X8W6fW0cXXgSQlQv6%2BGm56oLPFb%2BBzp4Zp0Jk31Q7VB2EhfHTQr552KKQvwnr0DLwiCGAjFLjXQu5k4wQDhkquxe0fcKAr189rW0oVC%2FUNT90lhQw%2FeK1YTKGaGMaVTA43KPPJgln5r6EyAFXJBTXUTHMQYNUGPAn1vyMBREEjn2Ts7UVuFPBsYZxyycn3%2FJQidgN5%2Fs4jFUgxborIChfZl5Knf%2FVvrCsaTK1xjelFV9aJ4vSQEqdbQph0J%2BFzOTZoFTk7SGVaHUeUnjYH7MU%2BYoTaXZviiJeAT%2BGv8SDhPJS6U7oocNFDcjLDP%2BO4oQr68wBHUZd0f5eTVKzDGiI7TBjqZAVQll2BtIAkABH7j4V4ShYb%2F%2F710jPmPB7tnaK95PcFIAr19SkIdU15NtMpUHSCRJMhDWZNGAis%2FwdrzSN0jSj7a5Phi%2FK8rVGCE26%2BxJ%2FwfLmJR4mYK2jv0If9iBI4rZn3SGhFQXGyK3arleaRQGiRYE8tpeNwndeQr6KPPIGWi%2FFdSRBLC1uSSRruMRMzW%2Bi%2FXQpuoZIRANA%3D%3D&Expires=1784910361)
+
+## Priorità alta
+
+1. **Infortuni e XI atteso, ma in forma probabilistica.**  
+   Non basta il flag “out/in”: la feature utile è la perdita attesa di qualità della formazione titolare, stimata come somma ponderata dei minuti attesi mancanti e del rating del giocatore. Fonte pratica: API-Football, Sofascore, Transfermarkt injury feed, e se vuoi qualcosa di più robusto usa un tuo parser per news + probabile XI. In Python puoi creare `expected_absence_strength = sum(player_rating * prob_out)` e poi usarla per correggere \( \lambda_{home}, \lambda_{away} \) o come feature in un meta-modello. In Streamlit, mostra una tabella “XI atteso vs XI base” con delta di forza e confidenza. Questo si allinea bene con la roadmap che già cita formazioni/infortuni come alto impatto. [ppl-ai-file-upload.s3.amazonaws](https://ppl-ai-file-upload.s3.amazonaws.com/web/direct-files/attachments/67443907/dc3d3b7e-23cb-4fc5-96ad-17e5a8ef3a80/Progetto_completo.md.txt?AWSAccessKeyId=ASIA2F3EMEYEQ4B6U7XE&Signature=ZAZLaqV1bS9jn4H4WOy2D%2BGQdg4%3D&x-amz-security-token=IQoJb3JpZ2luX2VjEEAaCXVzLWVhc3QtMSJGMEQCH0LKIyYkr1GipI1eebOirKVYwudhbyTScyf5Nd40PaICIQD8bn%2FIwVJAX6qcwpTjkMwfUP1PoxtZ7c%2FzOwgdRmDxyirzBAgJEAEaDDY5OTc1MzMwOTcwNSIMIs9oJJVFd6a2%2B6KCKtAEG3Ka17v5yp5LrlNUJNCN%2FtpipIU47uAaFVHA%2Bd4Fa%2BqfLahVcynxT0TbJLIVhzDYYVCIQjqLey17%2BtxuxjboDwn%2BcAYD%2BkdQUux0ZC51n6%2Fb2DGYX1unv3qhGqu9QQt9qzG3Q7PYAoW1PibJwNQNQYetajsRsjzd%2BREuhOw3%2BiqhHNagTGMR4igNxfjIYqTdRjCLNHXNMH2u4gk%2FYVK7rGf0r5fs98jtiehkcyj2mmsw82eYcvsfUqf368mmWX79%2BaEJG7bR5%2FOhH3w2QL%2Fv%2BNCafRgUKICLvXHQzA3iThZQ5XHjT01E6MB0y4laTrEHxbotT8r4YecRmXcFrtrm%2BbV71r52XmlVe5y5qm9snpb89PV1%2BSplMaJCatdJwr0kC6Cmfr%2BkF%2B64dUov8opGHeLzLP4%2Fp8I52XjVRM5rllkQ6MFSB2D65BYLcL9tJXmHE7j77X8W6fW0cXXgSQlQv6%2BGm56oLPFb%2BBzp4Zp0Jk31Q7VB2EhfHTQr552KKQvwnr0DLwiCGAjFLjXQu5k4wQDhkquxe0fcKAr189rW0oVC%2FUNT90lhQw%2FeK1YTKGaGMaVTA43KPPJgln5r6EyAFXJBTXUTHMQYNUGPAn1vyMBREEjn2Ts7UVuFPBsYZxyycn3%2FJQidgN5%2Fs4jFUgxborIChfZl5Knf%2FVvrCsaTK1xjelFV9aJ4vSQEqdbQph0J%2BFzOTZoFTk7SGVaHUeUnjYH7MU%2BYoTaXZviiJeAT%2BGv8SDhPJS6U7oocNFDcjLDP%2BO4oQr68wBHUZd0f5eTVKzDGiI7TBjqZAVQll2BtIAkABH7j4V4ShYb%2F%2F710jPmPB7tnaK95PcFIAr19SkIdU15NtMpUHSCRJMhDWZNGAis%2FwdrzSN0jSj7a5Phi%2FK8rVGCE26%2BxJ%2FwfLmJR4mYK2jv0If9iBI4rZn3SGhFQXGyK3arleaRQGiRYE8tpeNwndeQr6KPPIGWi%2FFdSRBLC1uSSRruMRMzW%2Bi%2FXQpuoZIRANA%3D%3D&Expires=1784910361)
+
+2. **Differenziale qualità rosa basato su mercato, ma con dinamica temporale.**  
+   Il valore Transfermarkt è utile soprattutto se non lo usi come feature statica, ma come **slope**: variazione 30/90/180 giorni, e rapporto tra valore top-11 atteso e valore totale rosa. Aggiungi anche età media, concentrazione del valore nei top 5 giocatori, e “depth index” per misurare quanto una squadra perde qualità quando ruota. In Python puoi fare rolling features per club e poi usarle come prior per attacco/difesa in un modello gerarchico. Se il dato è rumoroso, meglio inserirlo come prior shrinked che come feature diretta.
+
+3. **Calendario contestuale e stress da congestione.**  
+   Hai già i giorni di riposo, ma il segnale vero spesso è: partita nel giro di 3/4 giorni, trasferta lunga, sequenza casa/trasferta, e coppe imminenti. Anche senza dati perfetti sulla distanza, puoi ricostruire il carico con `days_since_last_match`, `matches_last_14`, `away_after_away`, `cup_match_in_5_days`. In Streamlit fai un pannello “fatigue index” e una curva di impatto attesa. Questa è una delle poche aree dove il mercato può reagire in ritardo quando il turnover non è ancora noto.
+
+4. **Probabilità di goal/eventi da xG reali, non solo medie.**  
+   La tua idea Understat è ottima, ma il segnale più forte è spesso la divergenza tra xG recente e gol reali: finishing hot/cold, regressione alla media, e qualità delle occasioni. Usa rolling last-5/10 di `xG for`, `xG against`, `xG diff`, `shots in box`, `big chances` se disponibili. In modello, questi segnali funzionano meglio come correzione della media gol del Poisson che come sostituto del modello base. In Streamlit mostra due trend: “xG trend” e “goal conversion delta”, perché aiutano a spiegare perché una squadra è sopravvalutata o sottovalutata.
+
+## Priorità media
+
+5. **Mercato quote come segnale di micro-movimento, non solo quota finale.**  
+   Oltre alle odds consensus, cattura il **move**: variazione tra apertura e chiusura, e dispersione tra bookmaker. Il delta opening-close spesso contiene informazione su infortuni, probabili formazioni, e denaro informato. Se hai solo snapshot finali, prova a scaricare odds storiche da una fonte che espone opening/closing o almeno timestamp multipli. In Python crea feature come `odds_movement_home`, `odds_dispersion`, `steam_signal`. In Streamlit fai un grafico sparkline della quota nel tempo; questo è molto utile per capire se il mercato “sa già tutto”.
+
+6. **Stile arbitrale solo se hai dati affidabili per l’arbitro specifico.**  
+   Il tuo documento segnala che `Referee` nel dataset classico non è abbastanza coperto, quindi eviterei feature arbitro-greedy da quel file. Però puoi integrare una sorgente separata con statistiche per arbitro: rigori per gara, cartellini, fallo/rigore ratio, home bias. Queste variabili sono probabilmente deboli da sole, ma possono avere senso per mercati goal/cards o per correggere la probabilità di pareggio. Se il backtest non regge, tienile solo come variabili esplorative nel dashboard.
+
+7. **Meteo allo stadio.**  
+   Pioggia intensa, vento e temperatura estrema possono alterare ritmo, precisione nei cross e qualità del tiro. L’effetto è piccolo ma reale, e può diventare utile in Serie A quando il mercato sottovaluta il clima su match specifici. Usa Open-Meteo o Meteostat con geocoding degli stadi; poi associa pioggia, vento e temperatura al kickoff. In modello, trattalo come feature di interazione con stile di gioco: squadre più dirette e fisiche reagiscono diversamente rispetto alle squadre di possesso.
+
+8. **Motivazione competitiva, ma ricostruita in modo oggettivo.**  
+   Non come “psicologia” astratta, bensì come feature derivata da classifica e margine obiettivi: lotta scudetto, Europa, salvezza, centro classifica senza obiettivi. Tu stesso citi questa direzione nella roadmap, e vale la pena perché il mercato la incorpora spesso in modo incompleto nelle ultime giornate. Implementazione: ricostruisci la classifica a ogni turno e crea un `objective_pressure_index` basato su distanza da soglia obiettivo e partite residue. In Streamlit visualizza la zona obiettivo con badge e semaforo.
+
+## Priorità sperimentale
+
+9. **Lineup strength from player-level availability, anche senza dataset perfetto.**  
+   Se non hai un provider completo, puoi partire da un approccio “good enough”: presenze/minuti degli ultimi 12 mesi, infortunio/assenza, importanza nel sistema. Anche una stima grezza migliora più di molte feature deboli. Questo è particolarmente utile per neopromosse o squadre con tanti cambi di mercato, dove le medie storiche sono poco informative. In pratica: costruisci un `starting_xi_strength` e usa lo scarto rispetto alla forza media del club.
+
+10. **Modelo gerarchico con partial pooling per club, stagione e coach.**  
+   Questo è coerente con la tua roadmap e probabilmente il miglior salto “strutturale” dopo le feature nuove. Invece di stimare parametri separati per ogni squadra, usa un modello gerarchico che fa shrinkage verso la media di lega e condivide informazione tra club simili. Puoi implementarlo in PyMC con attacco/difesa dinamici, effetto casa, fattore allenatore, e random walk stagionale. In Streamlit, esponi posterior means e credible intervals, perché l’utente capisce meglio dove il modello è incerto.
+
+11. **Stacking o blending condizionato sul contesto.**  
+   Non un ensemble fisso, ma un blend che cambia per tipo di partita: ad esempio quote più pesanti nei match “normali”, modello statistico più pesante quando ci sono segnali forti di mismatch di rosa, infortunio o fatigue. Il meta-learner può usare come input la varianza tra modelli, la dispersione quote, e i segnali contestuali. In pratica il blend non dovrebbe essere “90% quote sempre”, ma una funzione del contesto. Questa è spesso una strada migliore di aggiungere tanti modelli deboli.
+
+## Value betting prudente
+
+12. **Value betting come filtro di ricerca, non come consiglio operativo.**  
+   Dal punto di vista tecnico, la cosa più utile è costruire un layer che segnali solo edge **robusti e stabili**, cioè quando EV positivo, bassa varianza tra bookmaker, e basso rischio di errore di calibrazione. Se vuoi restare coerente col disclaimer del progetto, presentalo come “watchlist di sottovalutazione” e non come invito a scommettere. Un buon criterio è richiedere edge minimo, probabilità calibrata, e conferma da almeno due modelli indipendenti. In Streamlit puoi mettere un pannello con `edge`, `confidence`, `market disagreement`, senza automatizzare alcuna azione.
+
+## Implementazione pratica
+
+Per partire, io farei così:
+
+1. **Pipeline dati nuova** con 4 tabelle: match, squad, player availability, market odds history.  
+2. **Feature engineering** con rolling window e join temporali rigorosi.  
+3. **Modello base Poisson/DC** aggiornato con correzione su xG, fatigue, market move, injury strength.  
+4. **Meta-layer gerarchico o stacking** solo dopo che ogni blocco aggiunge valore out-of-fold.  
+5. **Dashboard Streamlit** con schede separate: match, contesto, mercato, explainability, backtest.
+
+Uno scheletro Python molto concreto potrebbe essere:
+
+```python
+df["rest_days_home"] = (df["date"] - df.groupby("home_team")["date"].shift(1)).dt.days
+df["rest_days_away"] = (df["date"] - df.groupby("away_team")["date"].shift(1)).dt.days
+df["fatigue_diff"] = df["rest_days_home"] - df["rest_days_away"]
+
+df["injury_strength_home"] = home_injuries.apply(lambda x: sum(p["rating"]*p["prob_out"] for p in x))
+df["injury_strength_away"] = away_injuries.apply(lambda x: sum(p["rating"]*p["prob_out"] for p in x))
+df["injury_diff"] = df["injury_strength_home"] - df["injury_strength_away"]
+
+df["odds_move_home"] = df["open_home_odds"] - df["close_home_odds"]
+df["odds_dispersion"] = df[["book1","book2","book3"]].std(axis=1)
+
+df["xg_delta_home"] = df["rolling_xg_for_home"] - df["rolling_goals_for_home"]
+```
+
+In Streamlit, mostrerei una riga “spiegazione previsione” con 4-5 driver principali e il loro effetto sul risultato finale.
+
+## Ordine consigliato
+
+| Priorità | Integrazione | Impatto atteso | Fattibilità |
+|---|---|---:|---:|
+| 1 | Infortuni/XI atteso | Alto | Media |
+| 2 | Transfermarkt dinamico | Alto | Media |
+| 3 | Fatigue/calendario congestionato | Medio-alto | Alta |
+| 4 | xG reale + conversion delta | Alto | Alta |
+| 5 | Move quote e dispersione bookmaker | Medio-alto | Media |
+| 6 | Motivazione obiettivi | Medio | Media |
+| 7 | Meteo | Medio-basso | Alta |
+| 8 | Arbitri da fonte dedicata | Basso-medio | Media |
+| 9 | Modello gerarchico Bayesiano | Alto | Bassa-media |
+| 10 | Stacking condizionato | Alto | Media-bassa |
+
+Le fonti e le aree già nel tuo progetto confermano che xG, Transfermarkt, infortuni/formazioni, meteo, e Bayesiano gerarchico sono proprio i prossimi blocchi naturali; il resto sono estensioni che puntano più a trovare inefficienze specifiche del mercato che a sostituire il Poisson/Dixon–Coles. [ppl-ai-file-upload.s3.amazonaws](https://ppl-ai-file-upload.s3.amazonaws.com/web/direct-files/attachments/67443907/dc3d3b7e-23cb-4fc5-96ad-17e5a8ef3a80/Progetto_completo.md.txt?AWSAccessKeyId=ASIA2F3EMEYEQ4B6U7XE&Signature=ZAZLaqV1bS9jn4H4WOy2D%2BGQdg4%3D&x-amz-security-token=IQoJb3JpZ2luX2VjEEAaCXVzLWVhc3QtMSJGMEQCH0LKIyYkr1GipI1eebOirKVYwudhbyTScyf5Nd40PaICIQD8bn%2FIwVJAX6qcwpTjkMwfUP1PoxtZ7c%2FzOwgdRmDxyirzBAgJEAEaDDY5OTc1MzMwOTcwNSIMIs9oJJVFd6a2%2B6KCKtAEG3Ka17v5yp5LrlNUJNCN%2FtpipIU47uAaFVHA%2Bd4Fa%2BqfLahVcynxT0TbJLIVhzDYYVCIQjqLey17%2BtxuxjboDwn%2BcAYD%2BkdQUux0ZC51n6%2Fb2DGYX1unv3qhGqu9QQt9qzG3Q7PYAoW1PibJwNQNQYetajsRsjzd%2BREuhOw3%2BiqhHNagTGMR4igNxfjIYqTdRjCLNHXNMH2u4gk%2FYVK7rGf0r5fs98jtiehkcyj2mmsw82eYcvsfUqf368mmWX79%2BaEJG7bR5%2FOhH3w2QL%2Fv%2BNCafRgUKICLvXHQzA3iThZQ5XHjT01E6MB0y4laTrEHxbotT8r4YecRmXcFrtrm%2BbV71r52XmlVe5y5qm9snpb89PV1%2BSplMaJCatdJwr0kC6Cmfr%2BkF%2B64dUov8opGHeLzLP4%2Fp8I52XjVRM5rllkQ6MFSB2D65BYLcL9tJXmHE7j77X8W6fW0cXXgSQlQv6%2BGm56oLPFb%2BBzp4Zp0Jk31Q7VB2EhfHTQr552KKQvwnr0DLwiCGAjFLjXQu5k4wQDhkquxe0fcKAr189rW0oVC%2FUNT90lhQw%2FeK1YTKGaGMaVTA43KPPJgln5r6EyAFXJBTXUTHMQYNUGPAn1vyMBREEjn2Ts7UVuFPBsYZxyycn3%2FJQidgN5%2Fs4jFUgxborIChfZl5Knf%2FVvrCsaTK1xjelFV9aJ4vSQEqdbQph0J%2BFzOTZoFTk7SGVaHUeUnjYH7MU%2BYoTaXZviiJeAT%2BGv8SDhPJS6U7oocNFDcjLDP%2BO4oQr68wBHUZd0f5eTVKzDGiI7TBjqZAVQll2BtIAkABH7j4V4ShYb%2F%2F710jPmPB7tnaK95PcFIAr19SkIdU15NtMpUHSCRJMhDWZNGAis%2FwdrzSN0jSj7a5Phi%2FK8rVGCE26%2BxJ%2FwfLmJR4mYK2jv0If9iBI4rZn3SGhFQXGyK3arleaRQGiRYE8tpeNwndeQr6KPPIGWi%2FFdSRBLC1uSSRruMRMzW%2Bi%2FXQpuoZIRANA%3D%3D&Expires=1784910361)
+
+Se vuoi, il passo successivo più utile è trasformare questa lista in una **roadmap esecutiva da 2-4 settimane** con schema tabelle, endpoint, feature engineering e struttura Streamlit.
+
+
+By perplexity

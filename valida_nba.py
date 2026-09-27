@@ -23,7 +23,7 @@ from scipy.stats import norm
 
 import modello_nba
 import protocollo
-import unisci_quote_nba
+import predicta.nba.quote.unisci_quote_nba as unisci_quote_nba
 
 STAGIONI_TEST = 7  # come protocollo.py per il calcio: piu' stagioni, piu' potenza statistica
 COPERTURA_MINIMA_MERCATO = 0.9

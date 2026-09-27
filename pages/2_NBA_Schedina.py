@@ -25,10 +25,10 @@ import streamlit as st
 
 import modello_nba as mn
 import pronostico_nba as pn
-import quote_live_nba
+import predicta.nba.quote.quote_live_nba as quote_live_nba
 import schedina as sc
 import schedina_nba as sn
-import unisci_quote_nba
+import predicta.nba.quote.unisci_quote_nba as unisci_quote_nba
 import valida_nba
 
 st.set_page_config(

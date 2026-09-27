@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-import quote_live_nba as ql
+import predicta.nba.quote.quote_live_nba as ql
 
 
 def _book(chiave, h2h=None, spread=None, totale=None):
@@ -93,12 +93,12 @@ def test_quote_sharp_per_schedina_nel_formato_della_pagina():
 
 
 def test_squadre_coprono_lo_storico():
-    import unisci_quote_nba
+    import predicta.nba.quote.unisci_quote_nba as unisci_quote_nba
     assert set(unisci_quote_nba.MAPPA_SQUADRE.values()) == set(ql.SQUADRE.values())
 
 
 def test_raccolta_salta_odds_senza_partite_vicine(monkeypatch):
-    import raccogli_quote_nba
+    import predicta.nba.quote.raccogli_quote_nba as raccogli_quote_nba
 
     chiamate = []
     monkeypatch.setenv("ODDS_API_KEY", "x")

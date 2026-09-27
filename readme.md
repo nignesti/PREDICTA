@@ -100,7 +100,7 @@ Il dettaglio più istruttivo è per campionato: l'accuratezza favorisce il model
 
 Da qui il default a 100% quote: misurando il peso ottimale sulle 12.421 partite, l'RPS peggiora in modo **monotono** all'aumentare del peso del modello (0.19564 a peso 0, 0.19622 a peso 0.10, 0.19768 a peso 0.20). Non esiste un ottimo intermedio.
 
-Il motivo per cui non ce ne eravamo accorti: fra due configurazioni cambia previsione solo il ~2% delle partite, quindi il 98% del campione non porta informazione sulla differenza. Il calcolo di potenza, il protocollo di misura e le conseguenze sono in [ROADMAP.md](ROADMAP.md); gli script sono `valida_significativita.py` e `valida_multilega.py`.
+Il motivo per cui non ce ne eravamo accorti: fra due configurazioni cambia previsione solo il ~2% delle partite, quindi il 98% del campione non porta informazione sulla differenza. Il calcolo di potenza, il protocollo di misura e le conseguenze sono in [ROADMAP.md](docs/ROADMAP.md); gli script sono `valida_significativita.py` e `valida_multilega.py`.
 
 Questo non invalida il progetto: un mercato di scommesse liquido sui cinque campionati principali *dovrebbe* essere difficile da battere, e misurarlo onestamente — invece di continuare a credere a un vantaggio inesistente — è un risultato in sé.
 
@@ -111,10 +111,10 @@ Questo non invalida il progetto: un mercato di scommesse liquido sui cinque camp
 4. Con `peso_quote` alto, storico+forma+scontri non venivano rinormalizzati a sommare 1 tra loro: l'xG stimato collassava verso 0 (es. 0.24 gol attesi invece di ~1.6) perché le "quote" non entrano nel calcolo dell'xG ma nel blend finale delle probabilità — bug corretto.
 5. Con tutti i bug corretti e il modello validato su tre stagioni indipendenti: **né lo storico né gli scontri diretti aggiungono valore misurabile sopra le sole quote di mercato**; solo un peso piccolo (10%) alla forma recentissima aiuta in modo consistente.
 6. **Dopo 12 esperimenti tra Fase 2 e Fase 3, il pattern è netto**: aggiungere *feature nuove* non funziona quasi mai (Elo, gradient boosting, tiri/corner, giorni di riposo, indice motivazionale, modello Bayesiano gerarchico: tutti negativi); funziona invece *estrarre meglio l'informazione già contenuta nelle quote* (Shin e quota di chiusura, gli unici due miglioramenti adottati).
-7. **Una revisione del codice ha poi trovato sei bug**, il più grave dei quali nella dashboard: le quote degli scontri diretti non venivano orientate rispetto a chi giocava in casa, quindi la probabilità di vittoria della squadra di casa era mescolata con quella dell'avversaria — su Milan–Inter, 0.41 invece di 0.27 su una componente pesata al 90%. Corretti tutti, con test di regressione. Dettaglio in [ROADMAP.md](ROADMAP.md).
+7. **Una revisione del codice ha poi trovato sei bug**, il più grave dei quali nella dashboard: le quote degli scontri diretti non venivano orientate rispetto a chi giocava in casa, quindi la probabilità di vittoria della squadra di casa era mescolata con quella dell'avversaria — su Milan–Inter, 0.41 invece di 0.27 su una componente pesata al 90%. Corretti tutti, con test di regressione. Dettaglio in [ROADMAP.md](docs/ROADMAP.md).
 8. **La lezione finale è metodologica**: verificando la significatività statistica, *nessuno* dei risultati di Fase 2 e 3 — né i positivi né i negativi — era distinguibile dal rumore. Il collo di bottiglia non era il modello, era il campione su cui lo misuravamo.
 
-Il dettaglio di ogni esperimento — con numeri, causa probabile del fallimento e codice di validazione — è in **[ROADMAP.md](ROADMAP.md)**.
+Il dettaglio di ogni esperimento — con numeri, causa probabile del fallimento e codice di validazione — è in **[ROADMAP.md](docs/ROADMAP.md)**.
 
 ---
 
@@ -145,7 +145,7 @@ PredictA/
 ├── unisci_dati.py                          # Unisce i CSV stagionali (Date, Stagione, quote apertura e chiusura)
 ├── scarica_elo.py                          # Scarica lo storico Elo delle squadre da clubelo.com
 ├── scarica_altre_leghe.py                  # Scarica Premier/Liga/Bundesliga/Ligue 1 (prototipo multi-lega)
-├── test_dati.py                            # Script di ispezione rapida di un file stagione
+├── tests/test_dati.py                            # Script di ispezione rapida di un file stagione
 ├── serie_a.csv                             # Dataset completo (11.534 partite)
 ├── elo_storico.csv                         # Storico Elo delle 53 squadre (output di scarica_elo.py, gitignored)
 ├── requirements.txt                        # Dipendenze Python pinnate
@@ -181,10 +181,10 @@ PredictA/
 ├── prototipo_ensemble_stacking.py          # Prototipo: meta-learner out-of-fold
 │
 ├── readme.md                               # Questo file
-└── ROADMAP.md                              # Piano tecnico dettagliato Fase 2/3 e registro degli esperimenti
+└── docs/ROADMAP.md                              # Piano tecnico dettagliato Fase 2/3 e registro degli esperimenti
 ```
 
-Gli script `valida_*.py` e `prototipo_*.py` non fanno parte del percorso di produzione: sono il registro riproducibile degli esperimenti descritti in [ROADMAP.md](ROADMAP.md), tenuti in repo perché rieseguibili.
+Gli script `valida_*.py` e `prototipo_*.py` non fanno parte del percorso di produzione: sono il registro riproducibile degli esperimenti descritti in [ROADMAP.md](docs/ROADMAP.md), tenuti in repo perché rieseguibili.
 
 ---
 
@@ -202,13 +202,13 @@ mkdir predicta
 cd predicta
 
 # 2. Crea ambiente virtuale
-python -m venv venv
+python -m venv .venv
 
 # 3. Attiva ambiente virtuale
 # Windows:
-venv\Scripts\activate
+.venv\Scripts\activate
 # macOS/Linux:
-source venv/bin/activate
+source .venv/bin/activate
 
 # 4. Installa dipendenze
 pip install -r requirements.txt
@@ -268,7 +268,7 @@ La lezione operativa è che **le feature nuove non pagano, mentre estrarre megli
 - [ ] **Valore di mercato Transfermarkt** come variazione temporale (slope 30/90/180gg), non come feature statica
 - [ ] **Fonte xG aggiornabile**: il segnale di Understat è debolmente positivo ma il dataset disponibile si ferma a settembre 2024
 
-Il piano dettagliato (fonti dati specifiche, letteratura accademica, tecniche di modellazione, errori comuni da evitare, e il registro completo degli esperimenti falliti con la causa probabile) è in **[ROADMAP.md](ROADMAP.md)**.
+Il piano dettagliato (fonti dati specifiche, letteratura accademica, tecniche di modellazione, errori comuni da evitare, e il registro completo degli esperimenti falliti con la causa probabile) è in **[ROADMAP.md](docs/ROADMAP.md)**.
 
 ---
 

@@ -13,8 +13,8 @@ per QUOTE_TTL_SECONDI a tutti gli utenti della sessione.
 import pandas as pd
 import streamlit as st
 
-import clv_nba
-import quote_live_nba as ql
+import predicta.nba.quote.clv_nba as clv_nba
+import predicta.nba.quote.quote_live_nba as ql
 
 QUOTE_TTL_SECONDI = 15 * 60
 NOMI_MERCATI = {"h2h": "Moneyline", "spreads": "Spread", "totals": "Totale punti"}
