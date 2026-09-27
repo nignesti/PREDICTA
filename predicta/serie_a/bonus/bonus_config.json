@@ -1,0 +1,79 @@
+[
+  {
+    "bookmaker": "Eurobet",
+    "tipo": "deposito",
+    "importo": 100.0,
+    "rollover": 1,
+    "quota_minima": 1.5,
+    "margine_stimato": 0.05,
+    "scadenza": "solo nuovi clienti, primo deposito entro 7gg dalla registrazione; bonus (50% del deposito, max 100€) da rigiocare entro 7gg dall'accredito su multiple da almeno 5 eventi, quota minima 1.50 a evento"
+  },
+  {
+    "bookmaker": "Goldbet",
+    "tipo": "deposito",
+    "importo": 100.0,
+    "rollover": 5,
+    "quota_minima": 1.7,
+    "margine_stimato": 0.05,
+    "scadenza": "solo nuovi clienti, primo deposito min 20€ entro 7gg dalla registrazione; bonus (25% del deposito, max 100€) da rigiocare 5x entro 7gg dall'accredito su multiple da almeno 5 eventi, quota minima 1.70 a evento, max 100€ di bonus per ticket, esclusi live/sistemi/marcatori/antepost/cashout"
+  },
+  {
+    "bookmaker": "Lottomatica",
+    "tipo": "deposito",
+    "importo": 100.0,
+    "rollover": 5,
+    "quota_minima": 1.7,
+    "margine_stimato": 0.05,
+    "scadenza": "solo nuovi clienti, primo deposito min 20€ entro 7gg dalla registrazione; bonus (25% del deposito, max 100€) da rigiocare 5x entro 7gg dall'accredito su multiple da almeno 5 eventi, quota minima 1.70 a evento, max 100€ di bonus per ticket, esclusi live/sistemi/marcatori/antepost/cashout"
+  },
+  {
+    "bookmaker": "NetBet",
+    "tipo": "deposito",
+    "importo": 1000.0,
+    "rollover": 7,
+    "quota_minima": 1.5,
+    "margine_stimato": 0.05,
+    "scadenza": "primo deposito min 10€ entro 7gg dalla registrazione; per SBLOCCARE il bonus (100% del deposito) serve rigiocare 6x il depositato entro 30gg (min 3 selezioni, quota min 1.50/evento); bonus poi accreditato come Fun Bonus e va rigiocato ancora 1x entro 5gg per diventare Real Bonus (rollover totale stimato ~7x); max 100€ di bonus per scommessa per normativa ADM"
+  },
+  {
+    "bookmaker": "Bet365",
+    "tipo": "deposito",
+    "importo": 500.0,
+    "rollover": 11,
+    "quota_minima": 3.0,
+    "margine_stimato": 0.05,
+    "scadenza": "versamento qualificante min 5€ entro 7gg dalla registrazione; per ricevere il bonus (100% del versamento, max 500€) serve puntare 1x l'importo versato (scommesse assegnate); poi rollover 10x il bonus entro 30gg, quota min 3.00 per selezione valida (rollover totale stimato ~11x); max 100€ di fondi bonus per scommessa"
+  },
+  {
+    "bookmaker": "Snai",
+    "tipo": "deposito",
+    "importo": 500.0,
+    "rollover": 9,
+    "quota_minima": 1.5,
+    "margine_stimato": 0.05,
+    "scadenza": "codice BB-SPORT2K27, primo deposito min 10€ entro 7gg dalla registrazione; Bonus Gold (50% del deposito, max 500€) erogato in 5 tranche settimanali, rigiocare 9x su multiple da almeno 3 eventi, quota min 1.50/evento, da usare entro 7gg dall'assegnazione (esclusi cashout/sistemi/SGP); escluso il Play Bonus (solo slot) e il Lossback 20% (non modellato)"
+  },
+  {
+    "bookmaker": "Planetwin365",
+    "tipo": "deposito",
+    "importo": 100.0,
+    "rollover": 5,
+    "quota_minima": 1.7,
+    "margine_stimato": 0.05,
+    "scadenza": "promo 17/09-01/11/2026; primo deposito min 20€ entro 7gg dalla registrazione; bonus (25% del deposito, max 100€) da rigiocare 5x entro 7gg dall'accredito su multiple da almeno 5 eventi, quota minima 1.70 a evento, max 100€ di bonus per ticket, esclusi live/sistemi/marcatori/antepost/cashout; escluso rimborso settimanale sport (10€ x10 settimane, non modellato) e Play Bonus Slot"
+  },
+  {
+    "bookmaker": "BetFlag",
+    "tipo": "freebet",
+    "importo": 10.0,
+    "margine_stimato": 0.08,
+    "scadenza": "bonus senza deposito 10€ sport, assegnato dopo verifica documento/cellulare/email; turnover x1 in un'unica scommessa (singola o multipla) con quota totale minima 5.00, scadenza 3gg dall'attivazione; margine stimato alzato all'8% per la quota minima alta (5.00); esclusi i 200 Fun Flag (crediti non convertibili direttamente) e il Welcome Bonus fino a 5.000€ (percentuale/importo non specificati nel testo)"
+  },
+  {
+    "bookmaker": "StarCasino",
+    "tipo": "freebet",
+    "importo": 50.0,
+    "margine_stimato": 0.05,
+    "scadenza": "ATTENZIONE valore_netto qui e' un limite superiore, non realistico: il cashback (100% della puntata, min 5€ max 50€) viene accreditato SOLO se la prima scommessa qualificante (multipla pre-match, min 5€, almeno 6 eventi, quota totale >= 8.00) PERDE; se vince, nessun bonus. Bonus poi come Fun Bonus, rigioco x1 su almeno 5 selezioni quota min 1.50/evento entro 7gg, max 200€ convertibile in Real Bonus"
+  }
+]

@@ -30,6 +30,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+import predicta.serie_a.quote.quote_live_serie_a as quote_live_serie_a
 import schedina as sc
 from pronostico import df as df_storico, stats, stima_probabilita
 
@@ -163,16 +164,29 @@ with st.container(border=True, key="depth_3"):
                    "presenti nello storico) e inserisci le quote decimali. "
                    "Aggiungi righe con il + in fondo alla tabella.")
     with col_b:
-        usa_esempio = st.toggle("Precarica un esempio", value=False)
+        fonti = ["Nessuna", "Esempio storico"]
+        if "quote_live_serie_a" in st.session_state:
+            fonti.append("Quote live (Pinnacle)")
+        precarica = st.selectbox(
+            "Precarica", fonti,
+            help="Le quote live compaiono qui dopo averle scaricate nella pagina "
+                 "'Valore Serie A' (nessun credito in più).")
 
-    partenza = giornata_di_esempio(max_partite) if usa_esempio else tabella_vuota(max_partite)
+    if precarica == "Esempio storico":
+        partenza = giornata_di_esempio(max_partite)
+    elif precarica == "Quote live (Pinnacle)":
+        partenza = quote_live_serie_a.quote_sharp_per_schedina(
+            quote_live_serie_a.quote_in_tabella(st.session_state.quote_live_serie_a[0])
+        ).reindex(columns=COLONNE)
+    else:
+        partenza = tabella_vuota(max_partite)
 
     inserite = st.data_editor(
         partenza,
         num_rows="dynamic",
         width="stretch",
         hide_index=True,
-        key=f"editor_{usa_esempio}_{max_partite}",
+        key=f"editor_{precarica}_{max_partite}",
         column_config={
             "Casa": st.column_config.SelectboxColumn("Casa", options=SQUADRE, width="medium"),
             "Trasferta": st.column_config.SelectboxColumn("Trasferta", options=SQUADRE, width="medium"),
