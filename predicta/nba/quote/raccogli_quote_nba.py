@@ -17,7 +17,7 @@ import sys
 
 import pandas as pd
 
-import quote_live_nba as ql
+import predicta.nba.quote.quote_live_nba as ql
 
 
 def main():

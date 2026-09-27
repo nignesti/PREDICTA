@@ -20,7 +20,7 @@ movimento reale ma non introduce distorsioni a favore.
 import numpy as np
 import pandas as pd
 
-import quote_live_nba as ql
+import predicta.nba.quote.quote_live_nba as ql
 
 SOGLIA_EV = 0.02  # stessa soglia di default della pagina "Quote live e valore"
 
