@@ -164,22 +164,39 @@ def _coppie(tabella):
     return coppie.dropna(subset=["q1", "q2"]) if {"q1", "q2"} <= set(coppie.columns) else coppie.iloc[0:0]
 
 
-def probabilita_eque(tabella, book_sharp=BOOK_SHARP):
-    """Probabilita' senza margine (Shin) del primo esito di ogni mercato,
-    secondo il book sharp. Se il book sharp non quota una partita/mercato, la
-    moneyline ripiega sulla mediana delle probabilita' senza margine di tutti
-    i book (per spread e totale no: le linee dei book differiscono e una
-    mediana fra linee diverse non ha senso). Colonna 'fonte' per trasparenza."""
+MIN_BOOK_CONSENSO = 3  # sotto questa soglia la mediana e' troppo esposta al singolo book fuori mercato
+
+
+def probabilita_eque(tabella, book_sharp=BOOK_SHARP, min_book=MIN_BOOK_CONSENSO):
+    """Probabilita' senza margine (Shin) del primo esito di ogni mercato.
+
+    Fonte preferita: il book sharp. Se non quota la partita/mercato (succede
+    spesso: Pinnacle apre le linee NBA a ridosso della partita, e il primo
+    snapshot reale del 27/9/2026 non lo conteneva affatto), ripiega sul
+    consenso: mediana delle probabilita' senza margine dei book sulla linea
+    piu' quotata (per spread e totale le linee differiscono fra book, e una
+    mediana fra linee diverse non ha senso), solo se almeno 'min_book' book la
+    quotano. Il consenso dei book europei e' un riferimento piu' debole di
+    Pinnacle: la colonna 'fonte' lo dichiara, 'n_book' dice su quanti book."""
     coppie = _coppie(tabella)
+    colonne = ["id", "mercato", "linea_rif", "p1", "fonte", "n_book"]
     if coppie.empty:
-        return pd.DataFrame(columns=["id", "mercato", "linea_rif", "p1", "fonte"])
+        return pd.DataFrame(columns=colonne)
     coppie["p1"] = [probabilita_shin([a, b])[0] for a, b in zip(coppie["q1"], coppie["q2"])]
 
-    sharp = coppie[coppie["book"] == book_sharp][["id", "mercato", "linea_rif", "p1"]].assign(fonte=book_sharp)
-    ml = coppie[coppie["mercato"] == "h2h"]
-    consenso = ml.groupby(["id", "mercato", "linea_rif"], as_index=False)["p1"].median().assign(fonte="mediana book")
+    sharp = coppie[coppie["book"] == book_sharp][["id", "mercato", "linea_rif", "p1"]].assign(
+        fonte=book_sharp, n_book=1)
+
+    per_linea = coppie.groupby(["id", "mercato", "linea_rif"], as_index=False).agg(
+        p1=("p1", "median"), n_book=("book", "nunique"))
+    # linea modale: a parita' di book, la prima in ordine di linea (deterministico)
+    per_linea = per_linea.sort_values(["id", "mercato", "n_book", "linea_rif"],
+                                      ascending=[True, True, False, True], kind="stable")
+    consenso = per_linea.drop_duplicates(["id", "mercato"])
+    consenso = consenso[consenso["n_book"] >= min_book].assign(fonte="mediana book")
+
     senza_sharp = ~consenso.set_index(["id", "mercato"]).index.isin(sharp.set_index(["id", "mercato"]).index)
-    return pd.concat([sharp, consenso[senza_sharp]], ignore_index=True)
+    return pd.concat([sharp, consenso[senza_sharp]], ignore_index=True)[colonne]
 
 
 def trova_valore(tabella, soglia_ev=0.0, book_sharp=BOOK_SHARP, frazione_kelly=0.25):

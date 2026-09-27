@@ -64,9 +64,24 @@ def test_trova_valore_confronta_solo_la_stessa_linea_ed_esclude_lo_sharp():
 
 
 def test_consenso_quando_manca_lo_sharp():
+    senza_sharp = EVENTI[0]["bookmakers"][1:] + [
+        _book("tipico_de", h2h=(1.58, 2.50), spread=(-4.5, 1.88, 1.92)),
+        _book("sport888", spread=(-4.5, 1.90, 1.90)),
+    ]
+    eque = ql.probabilita_eque(ql.quote_in_tabella([dict(EVENTI[0], bookmakers=senza_sharp)]))
+    assert set(eque["fonte"]) == {"mediana book"}
+    ml = eque[eque["mercato"] == "h2h"].iloc[0]
+    assert ml["n_book"] == 3
+    # spread: -4.5 quotato da 3 book batte -5.0 (Betsson da solo)
+    sp = eque[eque["mercato"] == "spreads"].iloc[0]
+    assert sp["linea_rif"] == -4.5 and sp["n_book"] == 3
+    # totale: solo Unibet lo quota, sotto la soglia minima di book
+    assert "totals" not in set(eque["mercato"])
+
+
+def test_consenso_non_calcolato_con_pochi_book():
     eventi = [dict(EVENTI[0], bookmakers=EVENTI[0]["bookmakers"][1:])]
-    eque = ql.probabilita_eque(ql.quote_in_tabella(eventi))
-    assert list(eque["mercato"]) == ["h2h"] and eque["fonte"].iloc[0] == "mediana book"
+    assert ql.probabilita_eque(ql.quote_in_tabella(eventi)).empty
 
 
 def test_quote_sharp_per_schedina_nel_formato_della_pagina():

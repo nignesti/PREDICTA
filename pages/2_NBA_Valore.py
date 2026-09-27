@@ -148,21 +148,27 @@ righe = []
 for p in partite.itertuples(index=False):
     riga = {"Inizio": p.inizio.tz_convert("Europe/Rome").strftime("%d/%m %H:%M"),
             "Partita": f"{p.Casa} – {p.Trasferta}"}
+    fonti = set()
     for e in eque[eque["id"] == p.id].itertuples(index=False):
+        sigla = {"h2h": "ML", "spreads": "SP", "totals": "TOT"}[e.mercato]
+        fonti.add(f"{sigla}: {'Pinnacle' if e.fonte == ql.BOOK_SHARP else f'{e.n_book} book'}")
         if e.mercato == "h2h":
             riga["Casa vince"] = f"{e.p1:.0%} (equa {1 / e.p1:.2f})"
         elif e.mercato == "spreads":
             riga["Spread Casa"] = f"{e.linea_rif:+.1f}: {e.p1:.0%} (equa {1 / e.p1:.2f})"
         else:
             riga["Over"] = f"{e.linea_rif:g}: {e.p1:.0%} (equa {1 / e.p1:.2f})"
+    riga["Fonte"] = " · ".join(sorted(fonti)) or "—"
     righe.append(riga)
 
 with st.container(border=True):
-    st.markdown("**1. Probabilità eque (Pinnacle senza margine)**")
+    st.markdown("**1. Probabilità eque (senza margine)**")
     st.dataframe(pd.DataFrame(righe), hide_index=True, width="stretch")
     st.caption("La **quota equa** è la minima da accettare sul tuo bookmaker: se paga di più, "
-               "la scommessa ha valore atteso positivo. Senza Pinnacle, il moneyline usa la mediana "
-               "dei book; spread e totale no (linee diverse non si mediano).")
+               "la scommessa ha valore atteso positivo. Fonte preferita: Pinnacle. Se non quota la "
+               "partita (apre le linee NBA a ridosso della gara), si usa la mediana dei book europei "
+               f"sulla linea più quotata, con almeno {ql.MIN_BOOK_CONSENSO} book: riferimento più debole, "
+               "i valori trovati così vanno presi con più cautela.")
 
 st.space("medium")
 
