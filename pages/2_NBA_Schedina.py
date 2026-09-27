@@ -170,6 +170,27 @@ with st.container(border=True):
         },
     )
 
+    with st.expander(":material/help: Legenda colonne"):
+        st.markdown(
+            "- **Casa / Trasferta** — le due squadre della partita.\n"
+            "- **Vitt. Casa / Vitt. Trasf.** — quota decimale (es. 1.85) per la vittoria "
+            "della rispettiva squadra, mercato **moneyline**. Lascia entrambe vuote se non "
+            "vuoi giocare questo mercato su questa partita.\n"
+            "- **Linea spread** — l'handicap sui punti della squadra di Casa, con il segno: "
+            "**negativo** se la Casa è favorita (es. **-4.5** vuol dire che deve vincere di "
+            "più di 4.5 punti per coprire), **positivo** se è sfavorita (es. **+6.5**).\n"
+            "- **Quota spread Casa / Quota spread Trasf.** — quota decimale per coprire "
+            "quella linea, rispettivamente per Casa e Trasferta (di solito vicine a 1.91, "
+            "corrispondente al taglio standard USA -110).\n"
+            "- **Linea totale** — il totale punti (Casa + Trasferta) su cui si gioca Over/Under "
+            "(es. 224.5).\n"
+            "- **Quota Over / Quota Under** — quota decimale per il totale sopra o sotto "
+            "quella linea.\n\n"
+            "Non serve compilare tutte le colonne di ogni riga: basta una coppia completa "
+            "(le due quote di un mercato, più la linea per spread e totale) per far comparire "
+            "quel mercato tra i candidati della partita."
+        )
+
 # ------------------------------------------------------------
 # CALCOLO, PARTITA PER PARTITA
 # ------------------------------------------------------------
