@@ -14,9 +14,10 @@ mercato a tre esiti col pareggio, che qui non esiste. Vedi modello_nba.py e
 pronostico_nba.py per i dettagli, scarica_nba.py / unisci_dati_nba.py per
 come si genera nba_storico.csv.
 
-Nessuna quota storica nei dati NBA (nba_api espone solo box score ufficiali):
-a differenza della Serie A qui non c'e' un "precarica esempio" con quote
-reali, si inseriscono a mano quelle della giornata che si vuole analizzare.
+A differenza della prima versione di questa pagina, ora esiste uno storico
+quote (nba_quote_storico.csv, da nba_2010-2026.csv via unisci_quote_nba.py):
+come per la Serie A, "Precarica un esempio" prende una giornata reale con le
+sue quote di moneyline e spread/totale, invece di partire da zero.
 """
 import numpy as np
 import pandas as pd
@@ -26,6 +27,8 @@ import modello_nba as mn
 import pronostico_nba as pn
 import schedina as sc
 import schedina_nba as sn
+import unisci_quote_nba
+import valida_nba
 
 st.set_page_config(
     page_title="PredictA — Schedina NBA",
@@ -50,10 +53,48 @@ REGOLE = {
     "Il più probabile": "confidenza",
     "Quello che paga di più, sopra soglia": "quota",
 }
+# I dati grezzi (nba_2010-2026.csv) riportano la linea reale di spread/totale ma
+# non una quota per coprirla: a differenza del moneyline, l'americano -110 su
+# entrambi i lati e' quasi universale nel mercato NBA, quindi e' l'unica scelta
+# ragionevole per precompilare l'esempio senza inventare un numero a caso.
+QUOTA_STANDARD_SPREAD_TOTALE = 1.91
 
 
 def tabella_vuota(n):
     return pd.DataFrame({c: [None] * n for c in COLONNE})
+
+
+def _americano_a_decimale(moneyline):
+    ml = np.asarray(moneyline, dtype=float)
+    positivo = ml > 0
+    decimale = np.empty_like(ml)
+    decimale[positivo] = 1 + ml[positivo] / 100.0
+    decimale[~positivo] = 1 + 100.0 / -ml[~positivo]
+    return decimale
+
+
+@st.cache_data
+def giornata_di_esempio(n):
+    """Ultime n partite dello storico con moneyline reale nota, come riga di
+    partenza per chi vuole provare lo strumento subito. Spread e totale usano
+    la linea reale (dal file quote) ma la quota standard del mercato USA
+    (QUOTA_STANDARD_SPREAD_TOTALE): i dati grezzi non includono una quota per
+    quei due mercati, solo la linea (vedi unisci_quote_nba.py)."""
+    quote = unisci_quote_nba.carica_quote(unisci_quote_nba.FILE_GREZZO)
+    d = quote.dropna(subset=["moneyline_home", "moneyline_away", "spread", "total"]).tail(n)
+    spread_casa = valida_nba.spread_casa_segnato(d)
+    return pd.DataFrame({
+        "Casa": d["HomeTeam"].to_list(),
+        "Trasferta": d["AwayTeam"].to_list(),
+        "Quota vittoria Casa": _americano_a_decimale(d["moneyline_home"]).round(2),
+        "Quota vittoria Trasferta": _americano_a_decimale(d["moneyline_away"]).round(2),
+        "Linea spread (Casa)": spread_casa.round(1),
+        "Quota spread Casa": QUOTA_STANDARD_SPREAD_TOTALE,
+        "Quota spread Trasferta": QUOTA_STANDARD_SPREAD_TOTALE,
+        "Linea totale": d["total"].round(1).to_list(),
+        "Quota Over": QUOTA_STANDARD_SPREAD_TOTALE,
+        "Quota Under": QUOTA_STANDARD_SPREAD_TOTALE,
+    })
 
 
 # ------------------------------------------------------------
@@ -64,12 +105,12 @@ with st.sidebar:
     with st.container(border=True):
         peso_quote = st.slider(
             "Quote bookmaker", 0.0, 1.0, 1.0, 0.05,
-            help="Peso delle quote che inserisci rispetto al rating Elo. Default 1.0, "
-                 "in linea con quanto misurato per il calcio (ROADMAP.md): il mercato e' "
-                 "il miglior previsore disponibile, il modello statistico non lo batte in "
-                 "modo misurabile. Qui non e' stato validato allo stesso modo (nessuna "
-                 "quota storica nei dati NBA per un backtest), ma resta il default piu' "
-                 "prudente.")
+            help="Peso delle quote che inserisci rispetto al rating Elo. Default 1.0: "
+                 "misurato su 8.919 partite di 7 stagioni (valida_nba.py, walk-forward, "
+                 "moneyline reale + proxy da spread dove il moneyline manca), l'Elo calibrato "
+                 "batte 'vince sempre la casa' ma perde contro il mercato (RPS peggiore di "
+                 "+0.012, accuratezza -2.78 punti). Stessa conclusione del calcio (ROADMAP.md): "
+                 "il mercato resta il miglior previsore disponibile.")
         st.caption(f"Rating Elo: **{1 - peso_quote:.0%}**")
 
     st.markdown("### :material/receipt_long: Composizione")
@@ -96,18 +137,24 @@ st.markdown(
 st.space("medium")
 
 with st.container(border=True):
-    st.markdown("**1. Partite e quote**")
-    st.caption(f"Scegli le squadre dai menu a tendina ({len(SQUADRE)} squadre presenti nello "
-               "storico) e inserisci le quote decimali dei mercati che vuoi usare — lascia "
-               "vuote quelle dei mercati che non ti interessano. Aggiungi righe con il + in "
-               "fondo alla tabella.")
+    col_a, col_b = st.columns([3, 1], vertical_alignment="bottom")
+    with col_a:
+        st.markdown("**1. Partite e quote**")
+        st.caption(f"Scegli le squadre dai menu a tendina ({len(SQUADRE)} squadre presenti nello "
+                   "storico) e inserisci le quote decimali dei mercati che vuoi usare — lascia "
+                   "vuote quelle dei mercati che non ti interessano. Aggiungi righe con il + in "
+                   "fondo alla tabella.")
+    with col_b:
+        usa_esempio = st.toggle("Precarica un esempio", value=False)
+
+    partenza = giornata_di_esempio(max_partite) if usa_esempio else tabella_vuota(max_partite)
 
     inserite = st.data_editor(
-        tabella_vuota(max_partite),
+        partenza,
         num_rows="dynamic",
         width="stretch",
         hide_index=True,
-        key=f"editor_nba_{max_partite}",
+        key=f"editor_nba_{usa_esempio}_{max_partite}",
         column_config={
             "Casa": st.column_config.SelectboxColumn("Casa", options=SQUADRE, width="small"),
             "Trasferta": st.column_config.SelectboxColumn("Trasferta", options=SQUADRE, width="small"),
