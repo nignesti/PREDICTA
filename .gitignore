@@ -23,3 +23,8 @@ altre_leghe/
 componenti_multilega.csv.gz
 componenti_multilega_ou.csv.gz
 ricerca_configurazione.csv
+
+# Dati grezzi NBA (rigenerabili con "python scarica_nba.py"): un file per
+# stagione da stats.nba.com via nba_api. nba_storico.csv (il risultato unito
+# di unisci_dati_nba.py) resta tracciato, come serie_a.csv per il calcio.
+nba_stagioni/
