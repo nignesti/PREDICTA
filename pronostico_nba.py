@@ -5,17 +5,21 @@ punti totali recenti per il totale. Separato dall'interfaccia
 (pages/2_NBA.py) per lo stesso motivo di pronostico.py per il calcio: i test
 possono importare il modello senza far girare la UI.
 
-Nessuna quota storica qui dentro (nba_api non le fornisce): il blend con il
-mercato usa le quote che l'utente inserisce partita per partita, calcolato
-nella pagina — questo modulo restituisce solo le stime "pure modello".
+Le quote storiche vengono da nba_quote_storico.csv (nba_2010-2026.csv via
+unisci_quote_nba.py), sempre presente nel repo: e' la stessa fonte dati usata
+per il backtest (valida_nba.py), quindi lo storico Elo qui e quello validato
+sono lo stesso. Se esiste anche nba_storico.csv (box score reali via
+nba_api, scarica_nba.py + unisci_dati_nba.py) viene unito alle quote per
+Stagione/PTS/Winner piu' precisi; altrimenti bastano le sole quote, che li
+forniscono comunque (vedi unisci_quote_nba.carica_quote).
 """
 import numpy as np
 import pandas as pd
 import streamlit as st
 
 import modello_nba as mn
+import valida_nba
 
-DATA_FILE = "nba_storico.csv"
 PARTITE_FINESTRA_TOTALE = 10  # finestra per il ritmo di gioco recente (punti totali):
                               # piu' ampia della "forma" nel calcio (3) perche' qui non
                               # deve catturare la forza relativa (ci pensa gia' l'Elo),
@@ -23,29 +27,30 @@ PARTITE_FINESTRA_TOTALE = 10  # finestra per il ritmo di gioco recente (punti to
 
 
 class DatiNBANonDisponibili(Exception):
-    """Sollevata quando nba_storico.csv manca: la pagina la intercetta e mostra
-    le istruzioni per generarlo (scarica_nba.py + unisci_dati_nba.py)."""
+    """Sollevata quando manca anche nba_quote_storico.csv (es. repo
+    incompleto): la pagina la intercetta e mostra le istruzioni per
+    ricrearlo (unisci_quote_nba.py, a partire da nba_2010-2026.csv)."""
 
 
 @st.cache_data
-def load_data(path=DATA_FILE):
+def load_data():
     try:
-        df = pd.read_csv(path, parse_dates=["Date"])
-    except FileNotFoundError:
+        df = valida_nba.carica_storico()
+    except FileNotFoundError as errore:
         raise DatiNBANonDisponibili(
-            f"'{path}' non trovato. Genera lo storico con:\n\n"
-            f"1. `python scarica_nba.py` (scarica i box score da stats.nba.com via nba_api)\n"
-            f"2. `python unisci_dati_nba.py` (li unisce in {path})"
+            f"Storico NBA non disponibile ({errore}). Ricrea nba_quote_storico.csv con:\n\n"
+            f"`python unisci_quote_nba.py`\n\n"
+            f"(richiede nba_2010-2026.csv nel repo)."
         )
-    return df.sort_values("Date", kind="stable").reset_index(drop=True)
+    return df
 
 
 @st.cache_resource
-def prepara_modello(path=DATA_FILE):
+def prepara_modello():
     """Calcola una sola volta per sessione l'intero storico Elo (walk-forward,
     nessun lookahead per costruzione) e le calibrazioni che ne dipendono:
     costoso da rifare a ogni interazione con gli slider."""
-    df = load_data(path)
+    df = load_data()
     df_elo, rating_finali = mn.calcola_elo_storico(df)
     modello_moneyline = mn.calibra_probabilita(df_elo["EloDiff"], df_elo["Winner"] == "H")
     modello_margine, sigma_margine = mn.calibra_margine(
@@ -54,8 +59,8 @@ def prepara_modello(path=DATA_FILE):
     return df_elo, rating_finali, modello_moneyline, modello_margine, sigma_margine, sigma_totale
 
 
-def squadre_disponibili(path=DATA_FILE):
-    df = load_data(path)
+def squadre_disponibili():
+    df = load_data()
     return sorted(set(df["HomeTeam"]) | set(df["AwayTeam"]))
 
 
