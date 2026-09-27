@@ -28,3 +28,9 @@ ricerca_configurazione.csv
 # stagione da stats.nba.com via nba_api. nba_storico.csv (il risultato unito
 # di unisci_dati_nba.py) resta tracciato, come serie_a.csv per il calcio.
 nba_stagioni/
+
+# Chiave The Odds API (quote_live_nba.py): mai nel repo
+.streamlit/secrets.toml
+
+# Snapshot delle quote live (quote_live_nba.py), base per un futuro calcolo del CLV
+quote_live/

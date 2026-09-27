@@ -53,6 +53,7 @@ pagine_serie_a = [
 
 pagine_nba = [
     st.Page("pages/2_NBA_Schedina.py", title="Costruttore schedina", icon=":material/receipt_long:"),
+    st.Page("pages/2_NBA_Valore.py", title="Quote live e valore", icon=":material/price_check:"),
 ]
 
 navigazione = st.navigation({

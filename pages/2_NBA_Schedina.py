@@ -25,6 +25,7 @@ import streamlit as st
 
 import modello_nba as mn
 import pronostico_nba as pn
+import quote_live_nba
 import schedina as sc
 import schedina_nba as sn
 import unisci_quote_nba
@@ -154,16 +155,29 @@ with st.container(border=True):
                    "vuote quelle dei mercati che non ti interessano. Aggiungi righe con il + in "
                    "fondo alla tabella.")
     with col_b:
-        usa_esempio = st.toggle("Precarica un esempio", value=False)
+        fonti = ["Nessuna", "Esempio storico"]
+        if "quote_live_nba" in st.session_state:
+            fonti.append("Quote live (Pinnacle)")
+        precarica = st.selectbox(
+            "Precarica", fonti,
+            help="Le quote live compaiono qui dopo averle scaricate nella pagina "
+                 "'Quote live e valore' (nessun credito in più).")
 
-    partenza = giornata_di_esempio(max_partite) if usa_esempio else tabella_vuota(max_partite)
+    if precarica == "Esempio storico":
+        partenza = giornata_di_esempio(max_partite)
+    elif precarica == "Quote live (Pinnacle)":
+        partenza = quote_live_nba.quote_sharp_per_schedina(
+            quote_live_nba.quote_in_tabella(st.session_state.quote_live_nba[0])
+        ).reindex(columns=COLONNE)
+    else:
+        partenza = tabella_vuota(max_partite)
 
     inserite = st.data_editor(
         partenza,
         num_rows="dynamic",
         width="stretch",
         hide_index=True,
-        key=f"editor_nba_{usa_esempio}_{max_partite}",
+        key=f"editor_nba_{precarica}_{max_partite}",
         column_config={
             "Casa": st.column_config.SelectboxColumn("Casa", options=SQUADRE, width="small"),
             "Trasferta": st.column_config.SelectboxColumn("Trasferta", options=SQUADRE, width="small"),
