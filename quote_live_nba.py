@@ -29,6 +29,7 @@ import pandas as pd
 from modello import probabilita_shin
 
 URL_ODDS = "https://api.the-odds-api.com/v4/sports/basketball_nba/odds"
+URL_EVENTI = "https://api.the-odds-api.com/v4/sports/basketball_nba/events"  # gratuito, niente quote
 REGIONI = "eu"
 MERCATI = ("h2h", "spreads", "totals")
 BOOK_SHARP = "pinnacle"
@@ -64,17 +65,37 @@ def chiave_api():
     return chiave or os.environ.get("ODDS_API_KEY")
 
 
-def scarica_quote(chiave, mercati=MERCATI, regioni=REGIONI, salva_snapshot=True):
+def _iso(istante):
+    return pd.Timestamp(istante).tz_convert("UTC").strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def partite_in_programma(chiave, fino_a):
+    """Numero di partite NBA che iniziano entro 'fino_a', da /events: non
+    consuma crediti (documentazione The Odds API v4), quindi serve a decidere
+    se vale la pena spendere crediti su /odds."""
+    import requests
+
+    risposta = requests.get(URL_EVENTI, timeout=20, params={"apiKey": chiave, "commenceTimeTo": _iso(fino_a)})
+    if not risposta.ok:
+        raise ErroreQuoteLive(f"Errore The Odds API /events: HTTP {risposta.status_code} {risposta.text[:200]}")
+    return len(risposta.json())
+
+
+def scarica_quote(chiave, mercati=MERCATI, regioni=REGIONI, salva_snapshot=True, fino_a=None):
     """Una sola chiamata a /odds. Restituisce (eventi_json, crediti) dove
-    crediti = {"rimanenti", "usati", "ultima"} dagli header di risposta."""
+    crediti = {"rimanenti", "usati", "ultima"} dagli header di risposta.
+    'fino_a' limita alle partite che iniziano entro quell'istante."""
     import requests
 
     if not chiave:
         raise ErroreQuoteLive("Chiave API mancante: imposta ODDS_API_KEY in .streamlit/secrets.toml")
-    risposta = requests.get(URL_ODDS, timeout=20, params={
+    parametri = {
         "apiKey": chiave, "regions": regioni, "markets": ",".join(mercati),
         "oddsFormat": "decimal", "dateFormat": "iso",
-    })
+    }
+    if fino_a is not None:
+        parametri["commenceTimeTo"] = _iso(fino_a)
+    risposta = requests.get(URL_ODDS, timeout=20, params=parametri)
     if risposta.status_code == 401:
         raise ErroreQuoteLive("Chiave API non valida o crediti esauriti (HTTP 401)")
     if risposta.status_code == 429:

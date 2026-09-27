@@ -95,3 +95,13 @@ def test_quote_sharp_per_schedina_nel_formato_della_pagina():
 def test_squadre_coprono_lo_storico():
     import unisci_quote_nba
     assert set(unisci_quote_nba.MAPPA_SQUADRE.values()) == set(ql.SQUADRE.values())
+
+
+def test_raccolta_salta_odds_senza_partite_vicine(monkeypatch):
+    import raccogli_quote_nba
+
+    chiamate = []
+    monkeypatch.setenv("ODDS_API_KEY", "x")
+    monkeypatch.setattr(ql, "partite_in_programma", lambda chiave, fino_a: 0)
+    monkeypatch.setattr(ql, "scarica_quote", lambda *a, **k: chiamate.append(k))
+    assert raccogli_quote_nba.main() == 0 and chiamate == []

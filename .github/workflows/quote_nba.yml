@@ -1,8 +1,9 @@
 # Raccolta delle quote NBA per il calcolo del CLV (clv_nba.py).
 # Due snapshot al giorno: 15:00 UTC (linee del mattino USA) e 23:00 UTC (a
 # ridosso delle prime palle a due, ~23:30-00:00 UTC; e' la "chiusura"
-# approssimata). Costo: 3 crediti a snapshot, ~180 al mese in stagione su 500.
-# Fuori stagione (nessuna partita) The Odds API non scala crediti.
+# approssimata). Solo partite entro 36 ore: senza partite vicine (offseason,
+# giorni di pausa) il controllo su /events e' gratuito e /odds non viene
+# chiamato. Costo in stagione: 3 crediti a snapshot, ~180 al mese su 500.
 # Richiede il secret del repository ODDS_API_KEY.
 name: Raccolta quote NBA
 
