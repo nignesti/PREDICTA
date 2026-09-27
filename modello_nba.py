@@ -85,6 +85,50 @@ def calcola_elo_storico(df, rating_iniziale=RATING_INIZIALE, vantaggio_casa=VANT
     return df_out, rating
 
 
+def calibra_margine(elo_diff, margine):
+    """Regressione lineare EloDiff -> margine di vittoria in casa (punti), piu'
+    la deviazione standard dei residui: serve al mercato spread, che chiede una
+    probabilita' di "copertura" di una linea (es. Casa -4.5), non solo chi
+    vince. Trattare il margine come Normale(margine_atteso, sigma) attorno alla
+    proiezione e' l'approccio standard nei modelli Elo->spread per l'NBA."""
+    from sklearn.linear_model import LinearRegression
+
+    X = np.asarray(elo_diff, dtype=float).reshape(-1, 1)
+    y = np.asarray(margine, dtype=float)
+    modello = LinearRegression().fit(X, y)
+    residui = y - modello.predict(X)
+    sigma = float(residui.std())
+    return modello, sigma
+
+
+def margine_atteso(modello_margine, elo_diff):
+    X = np.asarray(elo_diff, dtype=float).reshape(-1, 1)
+    return modello_margine.predict(X)
+
+
+def probabilita_copre_spread(margine_atteso, sigma_margine, linea_spread_casa):
+    """Probabilita' che la squadra di casa copra 'linea_spread_casa' (negativa
+    se favorita, es. -4.5): vince la copertura se margine_reale + linea > 0.
+    Con margine ~ Normale(margine_atteso, sigma_margine), la probabilita' e' il
+    CDF normale valutato in quel punto, riscalato dalla deviazione standard."""
+    from scipy.stats import norm
+
+    if sigma_margine <= 0:
+        return 1.0 if margine_atteso + linea_spread_casa > 0 else 0.0
+    return float(norm.cdf((margine_atteso + linea_spread_casa) / sigma_margine))
+
+
+def probabilita_over_totale(totale_atteso, sigma_totale, linea_totale):
+    """Probabilita' che il totale punti superi 'linea_totale', stessa logica
+    normale di probabilita_copre_spread ma centrata sul totale invece che sul
+    margine."""
+    from scipy.stats import norm
+
+    if sigma_totale <= 0:
+        return 1.0 if totale_atteso > linea_totale else 0.0
+    return float(norm.cdf((totale_atteso - linea_totale) / sigma_totale))
+
+
 def calibra_probabilita(elo_diff, vittoria_casa):
     """Regressione logistica di EloDiff -> vittoria in casa: sostituisce la
     pendenza fissa 1/400 con una stimata sui dati reali, stesso principio di
