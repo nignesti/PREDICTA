@@ -31,6 +31,3 @@ nba_stagioni/
 
 # Chiave The Odds API (quote_live_nba.py): mai nel repo
 .streamlit/secrets.toml
-
-# Snapshot delle quote live (quote_live_nba.py), base per un futuro calcolo del CLV
-quote_live/

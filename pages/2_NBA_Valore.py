@@ -13,6 +13,7 @@ per QUOTE_TTL_SECONDI a tutti gli utenti della sessione.
 import pandas as pd
 import streamlit as st
 
+import clv_nba
 import quote_live_nba as ql
 
 QUOTE_TTL_SECONDI = 15 * 60
@@ -35,6 +36,11 @@ def _scarica(mercati):
     return eventi, crediti, pd.Timestamp.now(tz="Europe/Rome")
 
 
+@st.cache_data(ttl=QUOTE_TTL_SECONDI)
+def _carica_snapshot():
+    return ql.carica_snapshot()
+
+
 with st.sidebar:
     st.markdown("### :material/tune: Richiesta")
     with st.container(border=True):
@@ -52,6 +58,44 @@ with st.sidebar:
                           help="Il Kelly pieno presuppone probabilità esatte: con stime "
                                "si usa una frazione (1/4 è la scelta prudente più comune).")
 
+
+def mostra_clv():
+    """Sezione CLV: legge solo gli snapshot gia' raccolti, nessun credito."""
+    with st.container(border=True):
+        st.markdown("**3. Verifica: le segnalazioni battono la chiusura? (CLV)**")
+        snapshot = _carica_snapshot()
+        clv, linea_mossa = clv_nba.calcola_clv(snapshot, soglia_ev=soglia_ev) if not snapshot.empty else (pd.DataFrame(), 0)
+        r = clv_nba.riepilogo_clv(clv)
+        if r is None:
+            st.info(":material/hourglass: Ancora nessuna segnalazione confrontabile con una chiusura. "
+                    "Gli snapshot li raccoglie GitHub Actions due volte al giorno (raccogli_quote_nba.py) "
+                    f"nella cartella quote_live/ del repo: {snapshot['istante'].nunique() if not snapshot.empty else 0} finora.")
+        else:
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Segnalazioni verificate", r["n"], help=f"Escluse {linea_mossa} per linea mossa.")
+            c2.metric("CLV medio", f"{r['clv_medio']:+.2%}",
+                      help=f"IC 95%: {r['ic_95'][0]:+.2%} / {r['ic_95'][1]:+.2%}")
+            c3.metric("Con CLV positivo", f"{r['quota_positivi']:.0%}")
+            if r["ic_95"][0] > 0:
+                st.success(":material/verified: Intervallo di confidenza tutto sopra zero: le segnalazioni "
+                           "battono la chiusura di Pinnacle, il vantaggio è misurabile.")
+            elif r["ic_95"][1] < 0:
+                st.error(":material/trending_down: Intervallo tutto sotto zero: le segnalazioni perdono "
+                         "contro la chiusura. Alza la soglia di EV o non usarle.")
+            else:
+                st.warning(":material/balance: Intervallo che include lo zero: ancora indistinguibile dal "
+                           "caso. Servono più segnalazioni.")
+        st.caption("Il **CLV** è quota presa × probabilità equa di Pinnacle all'ultimo snapshot prima "
+                   "dell'inizio − 1: misura se il prezzo era buono senza aspettare migliaia di risultati. "
+                   "La chiusura è approssimata (ultimo snapshot delle 23:00 UTC).")
+    st.space("large")
+    st.caption(
+        ":material/warning: Strumento dimostrativo ed educativo. Non costituisce invito al gioco d'azzardo. "
+        "Il gioco d'azzardo può causare dipendenza.",
+        text_alignment="center",
+    )
+
+
 st.title("PredictA — Valore NBA", text_alignment="center")
 st.markdown(
     "Quote di tutti i bookmaker europei confrontate con la quota equa di Pinnacle "
@@ -63,6 +107,7 @@ st.space("medium")
 if not ql.chiave_api():
     st.warning(":material/key: Manca la chiave The Odds API: aggiungi `ODDS_API_KEY = \"...\"` in "
                "`.streamlit/secrets.toml` (in locale) o nei Secrets dell'app su Streamlit Cloud.")
+    mostra_clv()
     st.stop()
 
 col_a, col_b = st.columns([3, 1], vertical_alignment="bottom")
@@ -74,12 +119,14 @@ if aggiorna:
         st.session_state.quote_live_nba = _scarica(tuple(mercati))
     except ql.ErroreQuoteLive as errore:
         st.error(f":material/error: {errore}")
+        mostra_clv()
         st.stop()
 
 if "quote_live_nba" not in st.session_state:
     with col_a:
         st.info(":material/info: Nessuna quota caricata. Premi **Aggiorna quote**: la chiamata parte "
                 "solo al clic e resta in cache 15 minuti.")
+    mostra_clv()
     st.stop()
 
 eventi, crediti, istante = st.session_state.quote_live_nba
@@ -91,6 +138,7 @@ tabella = ql.quote_in_tabella(eventi)
 if tabella.empty:
     st.info(":material/event_busy: Nessuna partita NBA in programma con quote disponibili "
             "(fuori stagione non si spendono crediti).")
+    mostra_clv()
     st.stop()
 
 # --- Quote eque ---
@@ -144,9 +192,6 @@ with st.container(border=True):
                "confronta a mano le loro quote con la **quota equa** della tabella 1. "
                "Le quote live sono anche precaricabili nel Costruttore schedina NBA.")
 
-st.space("large")
-st.caption(
-    ":material/warning: Strumento dimostrativo ed educativo. Non costituisce invito al gioco d'azzardo. "
-    "Il gioco d'azzardo può causare dipendenza.",
-    text_alignment="center",
-)
+st.space("medium")
+
+mostra_clv()

@@ -20,7 +20,6 @@ La chiave API si legge da st.secrets["ODDS_API_KEY"] o dalla variabile
 d'ambiente ODDS_API_KEY: mai nel codice (vedi .streamlit/secrets.toml, ignorato
 da git).
 """
-import json
 import os
 from datetime import datetime, timezone
 
@@ -33,7 +32,7 @@ URL_ODDS = "https://api.the-odds-api.com/v4/sports/basketball_nba/odds"
 REGIONI = "eu"
 MERCATI = ("h2h", "spreads", "totals")
 BOOK_SHARP = "pinnacle"
-CARTELLA_SNAPSHOT = "quote_live"  # uno snapshot JSON per chiamata: base per misurare il CLV in futuro
+CARTELLA_SNAPSHOT = "quote_live"  # uno snapshot per chiamata (tabella piatta, csv.gz): base del CLV (clv_nba.py)
 
 # Nomi completi di The Odds API -> abbreviazioni usate nello storico
 # (unisci_quote_nba.MAPPA_SQUADRE).
@@ -90,11 +89,32 @@ def scarica_quote(chiave, mercati=MERCATI, regioni=REGIONI, salva_snapshot=True)
     }
     eventi = risposta.json()
     if salva_snapshot and eventi:
-        os.makedirs(CARTELLA_SNAPSHOT, exist_ok=True)
-        istante = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        with open(os.path.join(CARTELLA_SNAPSHOT, f"nba_{istante}.json"), "w") as f:
-            json.dump(eventi, f)
+        salva_snapshot_quote(quote_in_tabella(eventi))
     return eventi, crediti
+
+
+def salva_snapshot_quote(tabella, istante=None, cartella=CARTELLA_SNAPSHOT):
+    """Salva la tabella piatta (quote_in_tabella) con l'istante di raccolta:
+    csv.gz invece del JSON grezzo perche' pesa ~10 volte meno, e questi file
+    finiscono nel repo (raccolti due volte al giorno da GitHub Actions)."""
+    istante = pd.Timestamp(istante or datetime.now(timezone.utc)).tz_convert("UTC")
+    os.makedirs(cartella, exist_ok=True)
+    percorso = os.path.join(cartella, f"nba_{istante:%Y%m%dT%H%M%SZ}.csv.gz")
+    tabella.assign(istante=istante).to_csv(percorso, index=False)
+    return percorso
+
+
+def carica_snapshot(cartella=CARTELLA_SNAPSHOT):
+    """Tutti gli snapshot salvati, concatenati (colonna 'istante')."""
+    import glob
+
+    file = sorted(glob.glob(os.path.join(cartella, "nba_*.csv.gz")))
+    if not file:
+        return pd.DataFrame()
+    df = pd.concat([pd.read_csv(f) for f in file], ignore_index=True)
+    df["inizio"] = pd.to_datetime(df["inizio"], utc=True)
+    df["istante"] = pd.to_datetime(df["istante"], utc=True)
+    return df
 
 
 def quote_in_tabella(eventi):
@@ -182,7 +202,7 @@ def trova_valore(tabella, soglia_ev=0.0, book_sharp=BOOK_SHARP, frazione_kelly=0
             ev = p * quota - 1
             if ev > soglia_ev:
                 righe.append({
-                    "inizio": r.inizio, "Casa": r.Casa, "Trasferta": r.Trasferta,
+                    "id": r.id, "inizio": r.inizio, "Casa": r.Casa, "Trasferta": r.Trasferta,
                     "mercato": r.mercato, "esito": esito,
                     "linea": _linea_esito(r.mercato, esito, r.linea_rif),
                     "book": r.nome_book, "quota": quota, "quota_equa": 1 / p,
