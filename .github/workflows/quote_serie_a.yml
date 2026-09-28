@@ -5,12 +5,22 @@
 # /odds non viene chiamato. Costo in campionato: 2 crediti a snapshot (h2h +
 # totals), ~120 al mese su 500, in aggiunta ai crediti usati dall'NBA (stesso
 # secret ODDS_API_KEY, stesso account The Odds API).
+#
+# Snapshot pre-partita (cron ogni 15 minuti, 9-19 UTC: copre i calci d'inizio
+# dalle 12:30 alle 20:45 italiane con ora legale e solare): solo 1X2, solo
+# partite che iniziano fra 25 e 45 minuti. E' la "chiusura" per il CLV: senza,
+# l'ultimo snapshot di una partita delle 15:00 era quello delle 22:00 del
+# giorno prima. Misurato su 11.597 partite (docs/ROADMAP.md, valida_fonte_quote.py):
+# apertura contro chiusura e' l'unica differenza di mercato significativa.
+# Costo: 1 credito per orario di inizio (a volte 2 per il ritardo del cron),
+# ~7 orari a giornata, ~40-70 crediti al mese. Fuori finestra /events e' gratuito.
 name: Raccolta quote Serie A
 
 on:
   schedule:
     - cron: "0 17 * * *"
     - cron: "0 20 * * *"
+    - cron: "*/15 9-19 * * *"
   workflow_dispatch:
 
 permissions:
@@ -32,7 +42,10 @@ jobs:
       - name: Scarica le quote
         env:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
-          QUOTE_MERCATI: h2h,totals
+          # il cron ogni 15 minuti e' lo snapshot pre-partita (vedi in cima)
+          QUOTE_MERCATI: ${{ github.event.schedule == '*/15 9-19 * * *' && 'h2h' || 'h2h,totals' }}
+          QUOTE_DA_MINUTI: ${{ github.event.schedule == '*/15 9-19 * * *' && '25' || '0' }}
+          QUOTE_ORIZZONTE_ORE: ${{ github.event.schedule == '*/15 9-19 * * *' && '0.75' || '36' }}
         run: python -m predicta.serie_a.quote.raccogli_quote_serie_a
       - name: Committa lo snapshot
         run: |

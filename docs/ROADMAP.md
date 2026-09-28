@@ -262,12 +262,37 @@ Due conclusioni:
 |---|---|---|---|
 | ~~0~~ | ~~Protocollo di misura~~ | ✅ **fatto**, vedi la sezione Fase 0 sopra | `protocollo.py` |
 | **1** | **Altre 4 leghe come TEST, non solo come training** | L'unico modo per uscire dal regime in cui ogni esperimento è indistinguibile: porta il campione da 2.659 a ~13.000 partite, l'ordine di grandezza che serve. Dati già scaricati, nessuna fonte nuova. Sblocca anche il multi-campionato, l'unico esperimento ancora vivo (p = 0.077) | Fase 0, conseguenza 3 |
-| **2** | **Movimento apertura→chiusura e dispersione tra bookmaker** come feature separate | L'unica idea rimasta che segue la logica dei due miglioramenti adottati: nessun dato nuovo, solo informazione già nel dataset estratta meglio. Il delta apertura→chiusura è letteratura nota come proxy di denaro informato | Fase 2, punto 6 (in coda) |
+| ~~2~~ | ~~Movimento apertura→chiusura e dispersione tra bookmaker~~ | ✅ **fatto, indistinguibile** — vedi "Fonte delle quote e tempismo" sotto | `valida_fonte_quote.py` |
 | 3 | **pi-ratings** (Constantinou & Fenton) | L'unico sistema di rating continuo mai provato; nei paper supera Elo semplice sulla predizione 1X2 — ma Elo qui è risultato negativo, quindi l'aspettativa va tarata al ribasso | Tier 2 |
 | 4 | **Valore di mercato Transfermarkt** come slope temporale (30/90/180gg) e prior shrinked | Cattura cambi di rosa che le medie storiche vedono in ritardo. Da usare come variazione, non come feature statica | Fase 2, punto 5 |
 | 5 | **Fonte xG aggiornabile** | Il segnale Understat è debolmente positivo; serve una fonte che non si fermi a settembre 2024. Lo scarto xG − gol reali come proxy di regressione alla media resta l'idea più interessante | Fase 2, punto 4 |
 
 Una nota di realismo su tutte e quattro: il mercato delle scommesse su Serie A è liquido ed efficiente, e sette anni di dati dicono che il margine sfruttabile sopra la quota di chiusura, se esiste, è inferiore a mezzo punto percentuale. È un risultato in sé, non un fallimento — ed è coerente con la letteratura sull'efficienza dei mercati di scommesse.
+
+---
+
+## Fonte delle quote e tempismo ✅ (27 settembre 2026)
+
+Visto che il previsore di produzione è la quota da sola, l'unico spazio rimasto è **quale** quota e **quando**. `valida_fonte_quote.py`, 11.597 partite di 5 campionati (2019-2025), colonne già nei file grezzi:
+
+| Confronto | Δ RPS (IC95%) | Verdetto |
+|---|---|---|
+| Pinnacle chiusura (Shin) vs media chiusura (Shin, produzione) | +0.00003 [−0.00006, +0.00014] | ➖ indistinguibile, anche per singolo campionato |
+| Pinnacle chiusura, proporzionale / power vs produzione | +0.00009 / +0.00003 | ➖ indistinguibile |
+| Betfair Exchange chiusura vs produzione (copertura 23%) | +0.00010 [−0.00005, +0.00026] | ➖ indistinguibile |
+| Ricalibrazione logistica walk-forward vs Pinnacle chiusura | +0.00008 [−0.00006, +0.00022] | ➖ indistinguibile |
+| + movimento apertura→chiusura | +0.00011 [−0.00009, +0.00033] | ➖ indistinguibile |
+| + movimento + dispersione tra bookmaker | +0.00016 [−0.00006, +0.00037] | ➖ indistinguibile |
+| + effetto campionato | +0.00063 [+0.00028, +0.00097] | ❌ peggio |
+| **Apertura vs chiusura (Pinnacle)** | **+0.00067 [+0.00025, +0.00107]** | ❌ **peggio** |
+
+**La quota di chiusura non lascia informazione residua**: né la fonte, né la conversione, né il movimento o la dispersione la migliorano. Priorità 2 chiusa. La media dei bookmaker resta in produzione (copertura piena, nessun motivo di cambiare).
+
+**L'unica differenza misurabile è il tempismo**: la quota di apertura è peggiore della chiusura di circa 5 volte qualunque altro effetto misurato qui. Conseguenze pratiche:
+
+- La pagina "Valore Serie A" scarica le quote al clic: la previsione è tanto migliore quanto più vicino al calcio d'inizio la si consulta.
+- La "chiusura" del CLV era l'ultimo snapshot programmato (17:00/20:00 UTC), per una partita delle 15:00 anche 20 ore prima. Aggiunto uno **snapshot pre-partita** (cron ogni 15 minuti, solo 1X2, partite fra 25 e 45 minuti dall'inizio) in `.github/workflows/quote_serie_a.yml`. Tutte le raccolte ora escludono le partite già iniziate (`commenceTimeFrom`), che prima consumavano crediti su quote in-play poi scartate.
+- Corretto in `clv_serie_a.chiusure` un difetto che lo snapshot pre-partita avrebbe attivato: la chiusura era l'ultimo snapshot **per partita** invece che per partita e mercato, quindi uno snapshot solo 1X2 avrebbe cancellato la chiusura dell'Over/Under.
 
 ---
 

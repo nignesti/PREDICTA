@@ -28,6 +28,15 @@ def test_chiusura_e_l_ultimo_snapshot_prima_dell_inizio(tmp_path):
     assert set(c["mercato"]) == {"h2h", "totals"}
 
 
+def test_snapshot_prepartita_solo_1x2_non_toglie_la_chiusura_del_totale(tmp_path):
+    _storico(tmp_path)
+    prepartita = [dict(EVENTI[0], bookmakers=[_book("pinnacle", h2h=(1.85, 3.60, 4.30))])]
+    ql.salva_snapshot_quote(ql.quote_in_tabella(prepartita), "2026-10-21T17:30Z", cartella=tmp_path)
+    c = clv_serie_a.chiusure(ql.carica_snapshot(tmp_path)).set_index("mercato")["istante_chiusura"]
+    assert c["h2h"] == pd.Timestamp("2026-10-21T17:30Z")
+    assert c["totals"] == pd.Timestamp("2026-10-21T17:00Z")
+
+
 def test_clv_calcolato_sulla_probabilita_di_chiusura(tmp_path):
     clv, linea_mossa = clv_serie_a.calcola_clv(_storico(tmp_path), soglia_ev=0.0)
     ml = clv[clv["mercato"] == "h2h"]

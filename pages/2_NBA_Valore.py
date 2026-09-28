@@ -14,6 +14,7 @@ import pandas as pd
 import streamlit as st
 
 import predicta.nba.quote.clv_nba as clv_nba
+import predicta.nba.quote.infortuni_nba as infortuni_nba
 import predicta.nba.quote.quote_live_nba as ql
 
 QUOTE_TTL_SECONDI = 15 * 60
@@ -34,6 +35,12 @@ def _scarica(mercati):
     finisce nella chiave di cache."""
     eventi, crediti = ql.scarica_quote(ql.chiave_api(), mercati=mercati)
     return eventi, crediti, pd.Timestamp.now(tz="Europe/Rome")
+
+
+@st.cache_data(ttl=5 * 60, show_spinner=False)
+def _infortuni():
+    """ESPN, gratuito: cache breve, cosi' una notizia appena uscita si vede."""
+    return infortuni_nba.scarica_infortuni()
 
 
 @st.cache_data(ttl=QUOTE_TTL_SECONDI)
@@ -169,6 +176,25 @@ with st.container(border=True, key="depth_4"):
                "partita (apre le linee NBA a ridosso della gara), si usa la mediana dei book europei "
                f"sulla linea più quotata, con almeno {ql.MIN_BOOK_CONSENSO} book: riferimento più debole, "
                "i valori trovati così vanno presi con più cautela.")
+
+# --- Quote superate dalle notizie ---
+try:
+    notizie = infortuni_nba.notizie_dopo_quote(_infortuni(), partite, istante)
+except infortuni_nba.ErroreInfortuni as errore:
+    st.caption(f":material/cloud_off: Controllo infortuni non disponibile ({errore}).")
+else:
+    if not notizie.empty:
+        with st.container(border=True):
+            st.warning(f":material/update: **Quote forse superate**: {len(notizie)} aggiornamenti sugli "
+                       f"infortuni usciti dopo le quote delle {istante:%H:%M} (o nei {infortuni_nba.MARGINE_MINUTI} "
+                       "minuti prima). Il mercato li prezza in pochi minuti: riscarica le quote prima di usarle.")
+            st.dataframe(pd.DataFrame({
+                "Aggiornato": notizie["aggiornato"].dt.tz_convert("Europe/Rome").dt.strftime("%d/%m %H:%M"),
+                "Partita": notizie["Casa"] + " – " + notizie["Trasferta"],
+                "Giocatore": notizie["squadra"] + " · " + notizie["giocatore"],
+                "Stato": notizie["stato"],
+                "Nota": notizie["nota"],
+            }), hide_index=True, width="stretch")
 
 st.space("medium")
 

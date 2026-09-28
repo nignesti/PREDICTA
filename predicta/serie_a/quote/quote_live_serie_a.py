@@ -75,19 +75,22 @@ def _iso(istante):
     return pd.Timestamp(istante).tz_convert("UTC").strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def partite_in_programma(chiave, fino_a):
-    """Numero di partite Serie A che iniziano entro 'fino_a', da /events: non
-    consuma crediti, quindi serve a decidere se vale la pena spendere crediti
-    su /odds."""
+def partite_in_programma(chiave, fino_a, da=None):
+    """Numero di partite Serie A che iniziano fra 'da' e 'fino_a', da /events:
+    non consuma crediti, quindi serve a decidere se vale la pena spendere
+    crediti su /odds."""
     import requests
 
-    risposta = requests.get(URL_EVENTI, timeout=20, params={"apiKey": chiave, "commenceTimeTo": _iso(fino_a)})
+    parametri = {"apiKey": chiave, "commenceTimeTo": _iso(fino_a)}
+    if da is not None:
+        parametri["commenceTimeFrom"] = _iso(da)
+    risposta = requests.get(URL_EVENTI, timeout=20, params=parametri)
     if not risposta.ok:
         raise ErroreQuoteLive(f"Errore The Odds API /events: HTTP {risposta.status_code} {risposta.text[:200]}")
     return len(risposta.json())
 
 
-def scarica_quote(chiave, mercati=MERCATI, regioni=REGIONI, salva_snapshot=True, fino_a=None):
+def scarica_quote(chiave, mercati=MERCATI, regioni=REGIONI, salva_snapshot=True, fino_a=None, da=None):
     """Una sola chiamata a /odds. Restituisce (eventi_json, crediti) dove
     crediti = {"rimanenti", "usati", "ultima"} dagli header di risposta."""
     import requests
@@ -100,6 +103,8 @@ def scarica_quote(chiave, mercati=MERCATI, regioni=REGIONI, salva_snapshot=True,
     }
     if fino_a is not None:
         parametri["commenceTimeTo"] = _iso(fino_a)
+    if da is not None:
+        parametri["commenceTimeFrom"] = _iso(da)
     risposta = requests.get(URL_ODDS, timeout=20, params=parametri)
     if risposta.status_code == 401:
         raise ErroreQuoteLive("Chiave API non valida o crediti esauriti (HTTP 401)")

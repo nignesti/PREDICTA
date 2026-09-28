@@ -91,6 +91,21 @@ def test_raccolta_salta_odds_senza_partite_vicine(monkeypatch):
 
     chiamate = []
     monkeypatch.setenv("ODDS_API_KEY", "x")
-    monkeypatch.setattr(ql, "partite_in_programma", lambda chiave, fino_a: 0)
+    monkeypatch.setattr(ql, "partite_in_programma", lambda chiave, fino_a, da=None: 0)
     monkeypatch.setattr(ql, "scarica_quote", lambda *a, **k: chiamate.append(k))
     assert raccogli_quote_serie_a.main() == 0 and chiamate == []
+
+
+def test_raccolta_prepartita_usa_finestra_stretta(monkeypatch):
+    import predicta.serie_a.quote.raccogli_quote_serie_a as raccogli_quote_serie_a
+
+    finestre, chiamate = [], []
+    monkeypatch.setenv("ODDS_API_KEY", "x")
+    monkeypatch.setenv("QUOTE_DA_MINUTI", "25")
+    monkeypatch.setenv("QUOTE_ORIZZONTE_ORE", "0.75")
+    monkeypatch.setattr(ql, "partite_in_programma", lambda chiave, fino_a, da=None: finestre.append((da, fino_a)) or 1)
+    monkeypatch.setattr(ql, "scarica_quote", lambda *a, **k: chiamate.append(k) or ([], {"ultima": 1, "rimanenti": 1}))
+    assert raccogli_quote_serie_a.main() == 0
+    da, fino_a = finestre[0]
+    assert fino_a - da == pd.Timedelta(minutes=20)
+    assert chiamate[0]["da"] == da and chiamate[0]["fino_a"] == fino_a

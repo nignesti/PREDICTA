@@ -30,7 +30,8 @@ def chiusure(snapshot, book_sharp=ql.BOOK_SHARP):
     pre = snapshot[snapshot["istante"] < snapshot["inizio"]]
     if pre.empty:
         return pd.DataFrame(columns=["id", "mercato", "linea_chiusura", "probabilita_chiusura", "istante_chiusura"])
-    ultimo = pre.groupby("id")["istante"].transform("max")
+    # per mercato: lo snapshot pre-partita ha solo l'1X2, il totale chiude prima
+    ultimo = pre.groupby(["id", "mercato"])["istante"].transform("max")
     finali = pre[pre["istante"] == ultimo]
     eque = []
     for (id_, istante), righe in finali.groupby(["id", "istante"]):
